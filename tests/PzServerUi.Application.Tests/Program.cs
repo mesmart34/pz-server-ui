@@ -1,7 +1,25 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using PzServerUi.Application;
 
+if (args is ["--launch-recovery-fixture", var install, var firstConfig, var secondConfig])
+{
+    var first = new ServerProfile(Path.GetFileNameWithoutExtension(firstConfig), firstConfig, null);
+    var second = new ServerProfile(Path.GetFileNameWithoutExtension(secondConfig), secondConfig, null);
+    var controller = new ServerLaunches();
+    Check(controller.Start(install, first).Started && controller.Start(install, second).Started,
+        "Both profiles must launch from the same Windows installation.");
+    await WaitUntil(() => controller.GetStatus(first) == ServerSessionStatus.Running
+        && controller.GetStatus(second) == ServerSessionStatus.Running,
+        "Both Windows sessions must reach readiness before the original controller process exits.");
+    return;
+}
+
 using var sandbox = new TestDirectory();
+// Never publish fixture ownership records to a developer's real session directory.
+Environment.SetEnvironmentVariable("LOCALAPPDATA", sandbox.Path);
 var folder = Directory.CreateDirectory(Path.Combine(sandbox.Path, "Dedicated Server")).FullName;
 File.WriteAllText(Path.Combine(folder, "StartServer64.bat"), "@echo off\r\n");
 var selectionFile = Path.Combine(sandbox.Path, "settings", "dedicated-installation.txt");
@@ -321,14 +339,31 @@ if (OperatingSystem.IsWindows())
     Check(!concurrentSessions.RequestStop(alphaProfile).Accepted, "An unowned profile must not receive a stop request.");
     try
     {
-        Check(concurrentSessions.Start(stopProbeDirectory, namedProfile).Started
-            && concurrentSessions.Start(stopProbeDirectory, alphaProfile).Started,
-            "Both profiles must launch from the same Windows installation.");
+        var startFixture = new ProcessStartInfo(Environment.ProcessPath!)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardError = true,
+        };
+        if (Path.GetFileNameWithoutExtension(startFixture.FileName).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
+            startFixture.ArgumentList.Add(typeof(TestDirectory).Assembly.Location);
+        foreach (var argument in new[] { "--launch-recovery-fixture", stopProbeDirectory,
+                     namedProfile.ConfigurationPath, alphaProfile.ConfigurationPath })
+            startFixture.ArgumentList.Add(argument);
+        using var originalController = Process.Start(startFixture)
+            ?? throw new InvalidOperationException("The original controller process did not start.");
+        var originalErrors = originalController.StandardError.ReadToEndAsync();
+        await originalController.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15));
+        Check(originalController.ExitCode == 0, $"The original controller could not start the fixtures: {await originalErrors}");
         await WaitUntil(() => concurrentSessions.GetStatus(namedProfile) == ServerSessionStatus.Running
             && concurrentSessions.GetStatus(alphaProfile) == ServerSessionStatus.Running,
-            "Both Windows sessions must reach readiness at the same time.");
+            "A different process must recover both sessions after the original controller exits.");
+        Check(!concurrentSessions.Start(stopProbeDirectory, namedProfile).Started
+            && !concurrentSessions.Start(stopProbeDirectory, alphaProfile).Started,
+            "Recovered live profiles must not be started a second time.");
         Check(concurrentSessions.RequestStop(namedProfile).Accepted, "The selected Windows session should accept a stop.");
         await WaitUntil(() => File.Exists(CommandPath(namedProfile)), "Quit did not reach the selected process.");
+        concurrentSessions = new ServerLaunches();
         Check(File.ReadAllText(CommandPath(namedProfile)) == "quit"
             && concurrentSessions.GetStatus(namedProfile) == ServerSessionStatus.Stopping
             && concurrentSessions.GetStatus(alphaProfile) == ServerSessionStatus.Running
@@ -356,7 +391,27 @@ if (OperatingSystem.IsWindows())
             concurrentSessions.RequestStop(profile);
         }
     }
-    Console.WriteLine("PASS: two Windows relays from one installation stop independently, even with PAUSE");
+    Console.WriteLine("PASS: two independent Windows sessions survive exit of the original controller process");
+
+    var recordDirectory = Path.Combine(sandbox.Path, "PzServerUi", "sessions");
+    var profileDigest = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(alphaProfile.Name.ToUpperInvariant())));
+    var recordPath = Path.Combine(recordDirectory, $"{profileDigest}.session.json");
+    Check(!File.Exists(recordPath), "Confirmed exit must remove the ownership record.");
+    var wrongId = Guid.NewGuid().ToString("N");
+    using var current = Process.GetCurrentProcess();
+    File.WriteAllText(recordPath, JsonSerializer.Serialize(new
+    {
+        Id = wrongId,
+        ProcessId = current.Id,
+        StartedAt = current.StartTime.ToFileTimeUtc() - TimeSpan.TicksPerSecond,
+    }));
+    var staleRecovery = new ServerLaunches();
+    Check(staleRecovery.GetStatus(alphaProfile) == ServerSessionStatus.TrackingLost
+        && !staleRecovery.RequestStop(alphaProfile).Accepted
+        && !staleRecovery.Start(stopProbeDirectory, alphaProfile).Started
+        && !File.Exists(Path.Combine(recordDirectory, $"{wrongId}.quit")),
+        "A reused PID with a different creation time must never receive a stop or allow a duplicate start.");
+    Console.WriteLine("PASS: recovery refuses a recorded PID whose creation time does not match");
 }
 
 static async Task WaitUntil(Func<bool> condition, string message)
@@ -386,6 +441,7 @@ sealed class FakeLaunchProcess : IServerLaunchProcess
 {
     public bool HasExited { get; set; }
     public bool ExitConfirmed { get; set; } = true;
+    public bool TrackingLost { get; set; }
     public bool ReadinessConfirmed { get; set; }
     public int StopRequests { get; private set; }
     public void RequestGracefulStop() => StopRequests++;

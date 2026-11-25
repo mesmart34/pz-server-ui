@@ -1,5 +1,8 @@
+using System.ComponentModel;
 using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace PzServerUi.Application;
@@ -14,9 +17,29 @@ internal static class WindowsSessionLauncher
         $log = $env:PZ_PANEL_SESSION_LOG
         $quit = $env:PZ_PANEL_SESSION_QUIT
         $exitSignal = $env:PZ_PANEL_SESSION_EXIT
+        $record = $env:PZ_PANEL_SESSION_RECORD
+        $temporaryRecord = [IO.Path]::ChangeExtension($log, '.json.tmp')
+        $lease = [Threading.Mutex]::new($false, $env:PZ_PANEL_PROFILE_MUTEX)
+        $hasLease = $false
+        $registered = $false
+        $childExited = $false
         $child = $null
         $reader = $null
         try {
+            try { $hasLease = $lease.WaitOne(0) } catch [Threading.AbandonedMutexException] { $hasLease = $true }
+            # A stale ownership record is deliberately not replaced: its child might still be alive.
+            if (!$hasLease -or [IO.File]::Exists($record)) { exit 1 }
+            $identity = [Diagnostics.Process]::GetCurrentProcess()
+            $metadata = @{
+                Id = $env:PZ_PANEL_SESSION_ID
+                ProcessId = $identity.Id
+                StartedAt = $identity.StartTime.ToFileTimeUtc()
+            }
+            $identity.Dispose()
+            [IO.File]::WriteAllText($temporaryRecord, (ConvertTo-Json -Compress -InputObject $metadata))
+            [IO.File]::Move($temporaryRecord, $record)
+            $registered = $true
+
             $start = [Diagnostics.ProcessStartInfo]::new()
             $start.FileName = $env:PZ_PANEL_CMD
             $start.WorkingDirectory = $env:PZ_PANEL_INSTALL
@@ -72,30 +95,30 @@ internal static class WindowsSessionLauncher
                 }
                 if (!$exited) { Start-Sleep -Milliseconds 75 }
             } until ($exited)
+            $childExited = $true
             if ($quitDelivered) { [IO.File]::WriteAllText($exitSignal, '') }
             exit $child.ExitCode
         } finally {
             if ($null -ne $reader) { $reader.Dispose() }
             if ($null -ne $child) { $child.Dispose() }
-            Remove-Item -LiteralPath $log -ErrorAction SilentlyContinue
-            Remove-Item -LiteralPath $quit -ErrorAction SilentlyContinue
+            if (!$registered -or $null -eq $child -or $childExited) {
+                if ($registered) { Remove-Item -LiteralPath $record -ErrorAction SilentlyContinue }
+                Remove-Item -LiteralPath $log -ErrorAction SilentlyContinue
+                Remove-Item -LiteralPath $quit -ErrorAction SilentlyContinue
+            }
+            Remove-Item -LiteralPath $temporaryRecord -ErrorAction SilentlyContinue
+            if ($hasLease) { $lease.ReleaseMutex() }
+            $lease.Dispose()
         }
         """;
 
-    public static IServerLaunchProcess Start(ProcessStartInfo launcher)
+    public static IServerLaunchProcess Start(string profile, ProcessStartInfo launcher)
     {
-        var appData = Environment.GetEnvironmentVariable("LOCALAPPDATA");
-        if (string.IsNullOrWhiteSpace(appData))
-            appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        if (!Path.IsPathFullyQualified(appData))
-            throw new IOException("Не удалось определить локальную папку журналов приложения.");
-
-        var sessionDirectory = Path.Combine(appData, "PzServerUi", "sessions");
+        var sessionDirectory = SessionDirectory();
         Directory.CreateDirectory(sessionDirectory);
-        var log = Path.Combine(sessionDirectory, $"{Guid.NewGuid():N}.log");
-        var quit = Path.ChangeExtension(log, ".quit");
-        var exitSignal = Path.ChangeExtension(log, ".exited");
-        using (File.Open(log, FileMode.CreateNew, FileAccess.Write, FileShare.Read))
+        var id = Guid.NewGuid().ToString("N");
+        var files = new SessionFiles(sessionDirectory, id, RegistryPath(sessionDirectory, profile));
+        using (File.Open(files.Log, FileMode.CreateNew, FileAccess.Write, FileShare.Read))
         {
         }
 
@@ -110,41 +133,135 @@ internal static class WindowsSessionLauncher
             foreach (var arg in new[] { "-NoLogo", "-NoProfile", "-EncodedCommand",
                          Convert.ToBase64String(Encoding.Unicode.GetBytes(ConsoleRelay)) })
                 helper.ArgumentList.Add(arg);
-            helper.Environment["PZ_PANEL_SESSION_LOG"] = log;
-            helper.Environment["PZ_PANEL_SESSION_QUIT"] = quit;
-            helper.Environment["PZ_PANEL_SESSION_EXIT"] = exitSignal;
+            helper.Environment["PZ_PANEL_SESSION_LOG"] = files.Log;
+            helper.Environment["PZ_PANEL_SESSION_QUIT"] = files.Quit;
+            helper.Environment["PZ_PANEL_SESSION_EXIT"] = files.Exit;
+            helper.Environment["PZ_PANEL_SESSION_ID"] = id;
+            helper.Environment["PZ_PANEL_SESSION_RECORD"] = files.Record;
+            helper.Environment["PZ_PANEL_PROFILE_MUTEX"] = $@"Local\PzServerUi-{Digest(files.Record.ToUpperInvariant())}";
             helper.Environment["PZ_PANEL_CMD"] = launcher.FileName;
             helper.Environment["PZ_PANEL_INSTALL"] = launcher.WorkingDirectory;
             helper.Environment["PZ_PANEL_CMD_ARGS"] = launcher.Arguments;
 
             var process = WindowsConsoleProcess.Start(helper);
-            return new WindowsLaunchProcess(process, new ReadinessLog(log), quit, exitSignal);
+            return new WindowsLaunchProcess(process, files);
         }
         catch
         {
-            try { File.Delete(log); }
+            try { File.Delete(files.Log); }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
             throw;
         }
     }
 
-    private sealed class WindowsLaunchProcess(Process process, ReadinessLog log, string quit, string exitSignal)
-        : IServerLaunchProcess
+    public static RecoveredServerSession? Recover(string profile)
     {
+        if (!OperatingSystem.IsWindows())
+            return null;
+
+        Process? process = null;
+        string? path = null;
+        try
+        {
+            var directory = SessionDirectory();
+            path = RegistryPath(directory, profile);
+            var record = ReadRecord(path);
+            if (record is null)
+                return null;
+            if (record.ProcessId <= 0 || record.StartedAt <= 0 || !Guid.TryParseExact(record.Id, "N", out _))
+                return new(null, ServerSessionStatus.TrackingLost);
+            process = Process.GetProcessById(record.ProcessId);
+            if (process.StartTime.ToFileTimeUtc() != record.StartedAt || process.HasExited)
+                return File.Exists(path) ? new(null, ServerSessionStatus.TrackingLost) : null;
+
+            var files = new SessionFiles(directory, record.Id, path);
+            var handle = new WindowsLaunchProcess(process, files);
+            var status = File.Exists(files.Quit) ? ServerSessionStatus.Stopping : ServerSessionStatus.Starting;
+            process = null; // The returned handle now owns this process reference.
+            return new(handle, status);
+        }
+        catch (ArgumentException) when (path is not null)
+        {
+            // PID no longer exists. It may have exited normally while we were reading the record.
+            return File.Exists(path) ? new(null, ServerSessionStatus.TrackingLost) : null;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException
+            or Win32Exception or InvalidOperationException)
+        {
+            return new(null, ServerSessionStatus.TrackingLost);
+        }
+        finally { process?.Dispose(); }
+    }
+
+    private static OwnershipRecord? ReadRecord(string path)
+    {
+        try
+        {
+            using var file = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+            if (file.Length is < 1 or > 4096)
+                throw new IOException("Недопустимый размер записи сеанса.");
+            return JsonSerializer.Deserialize<OwnershipRecord>(file)
+                ?? throw new JsonException("Пустая запись сеанса.");
+        }
+        catch (Exception error) when (error is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return null;
+        }
+    }
+
+    private static string SessionDirectory()
+    {
+        var appData = Environment.GetEnvironmentVariable("LOCALAPPDATA");
+        if (string.IsNullOrWhiteSpace(appData))
+            appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (!Path.IsPathFullyQualified(appData))
+            throw new IOException("Не удалось определить локальную папку сеансов приложения.");
+        return Path.Combine(appData, "PzServerUi", "sessions");
+    }
+
+    private static string RegistryPath(string directory, string profile) =>
+        Path.Combine(directory, $"{Digest(profile.ToUpperInvariant())}.session.json");
+
+    private static string Digest(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+
+    private sealed record OwnershipRecord(string Id, int ProcessId, long StartedAt);
+    private sealed record SessionFiles(string Directory, string Id, string Record)
+    {
+        public string Log => Path.Combine(Directory, $"{Id}.log");
+        public string Quit => Path.Combine(Directory, $"{Id}.quit");
+        public string Exit => Path.Combine(Directory, $"{Id}.exited");
+    }
+
+    private sealed class WindowsLaunchProcess(Process process, SessionFiles files) : IServerLaunchProcess
+    {
+        private readonly ReadinessLog _log = new(files.Log);
+
         public bool HasExited => process.HasExited;
-        public bool ExitConfirmed => File.Exists(exitSignal);
-        public bool ReadinessConfirmed => log.HasMarker();
+        public bool ExitConfirmed => File.Exists(files.Exit);
+        public bool ReadinessConfirmed => _log.HasMarker();
+        public bool TrackingLost
+        {
+            get
+            {
+                try { return ReadRecord(files.Record)?.Id == files.Id; }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException)
+                {
+                    return true;
+                }
+            }
+        }
+
         public void RequestGracefulStop()
         {
             if (process.HasExited)
                 throw new InvalidOperationException("Лаунчер уже завершился.");
-            using var request = File.Open(quit, FileMode.CreateNew, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
+            using var request = File.Open(files.Quit, FileMode.CreateNew, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
         }
 
         public void Dispose()
         {
             process.Dispose();
-            foreach (var path in new[] { quit, exitSignal })
+            foreach (var path in new[] { files.Quit, files.Exit })
             {
                 try { File.Delete(path); }
                 catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }

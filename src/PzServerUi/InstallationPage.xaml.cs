@@ -109,11 +109,12 @@ public partial class InstallationPage : ContentPage
             ServerSessionStatus.Stopping => "Останавливается. Ожидаем завершения сервера.",
             ServerSessionStatus.Stopped => "Остановлен",
             ServerSessionStatus.StopUnconfirmed => "Не удалось подтвердить остановку. Проверь консоль сервера.",
+            ServerSessionStatus.TrackingLost => "Не удалось восстановить управление. Проверь консоль сервера: повторный запуск заблокирован.",
             _ => "Сеанс не отслеживается.",
         };
         StartServerButton.IsEnabled = _savedInstallationFolder is not null
             && status is not (ServerSessionStatus.Starting or ServerSessionStatus.Running
-                or ServerSessionStatus.Stopping or ServerSessionStatus.StopUnconfirmed);
+                or ServerSessionStatus.Stopping or ServerSessionStatus.StopUnconfirmed or ServerSessionStatus.TrackingLost);
         StopServerButton.IsEnabled = status == ServerSessionStatus.Running;
         LaunchMessageLabel.Text = _launchMessages.GetValueOrDefault(profile.Name)
             ?? (_savedInstallationFolder is null ? "Выбери папку Dedicated Server, чтобы запустить профиль." : "");

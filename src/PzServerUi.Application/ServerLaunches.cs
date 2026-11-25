@@ -8,6 +8,7 @@ public interface IServerLaunchProcess : IDisposable
 {
     bool HasExited { get; }
     bool ExitConfirmed { get; }
+    bool TrackingLost { get; }
     bool ReadinessConfirmed { get; }
     void RequestGracefulStop();
 }
@@ -22,12 +23,13 @@ public enum ServerSessionStatus
     Stopping,
     Stopped,
     StopUnconfirmed,
+    TrackingLost,
 }
 
 public sealed record ServerLaunchResult(bool Started, string Message);
 public sealed record ServerStopResult(bool Accepted, string? Error = null);
 
-public sealed class ServerLaunches(Func<ProcessStartInfo, IServerLaunchProcess> startProcess)
+public sealed class ServerLaunches
 {
     private static readonly Regex SafeProfileName = new(
         @"\A[\p{L}\p{N}_][\p{L}\p{M}\p{N} _.-]*\z", RegexOptions.CultureInvariant);
@@ -42,8 +44,20 @@ public sealed class ServerLaunches(Func<ProcessStartInfo, IServerLaunchProcess> 
 
     private readonly object _gate = new();
     private readonly Dictionary<string, Session> _sessions = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Func<string, ProcessStartInfo, IServerLaunchProcess> _startProcess;
+    private readonly Func<string, RecoveredServerSession?>? _recover;
 
-    public ServerLaunches() : this(WindowsSessionLauncher.Start) { }
+    public ServerLaunches() : this(WindowsSessionLauncher.Start, WindowsSessionLauncher.Recover) { }
+
+    public ServerLaunches(Func<ProcessStartInfo, IServerLaunchProcess> startProcess)
+        : this((_, request) => startProcess(request), null) { }
+
+    private ServerLaunches(Func<string, ProcessStartInfo, IServerLaunchProcess> startProcess,
+        Func<string, RecoveredServerSession?>? recover)
+    {
+        _startProcess = startProcess;
+        _recover = recover;
+    }
 
     public ServerStopResult RequestStop(ServerProfile profile)
     {
@@ -79,8 +93,8 @@ public sealed class ServerLaunches(Func<ProcessStartInfo, IServerLaunchProcess> 
             try
             {
                 if (Observe(profile.Name) is ServerSessionStatus.Starting or ServerSessionStatus.Running
-                    or ServerSessionStatus.Stopping or ServerSessionStatus.StopUnconfirmed)
-                    return Reject("Окно запуска этого профиля ещё открыто. Второй запуск не выполнен.");
+                    or ServerSessionStatus.Stopping or ServerSessionStatus.StopUnconfirmed or ServerSessionStatus.TrackingLost)
+                    return Reject("Предыдущий сеанс ещё работает или его завершение не подтверждено. Второй запуск не выполнен.");
 
                 if (string.IsNullOrWhiteSpace(installationFolder))
                     return Reject("Сначала выбери папку Dedicated Server.");
@@ -110,7 +124,7 @@ public sealed class ServerLaunches(Func<ProcessStartInfo, IServerLaunchProcess> 
                     Arguments = $"/d /v:off /c .\\{launcher} -servername \"{profile.Name}\"",
                     UseShellExecute = false,
                 };
-                _sessions[profile.Name] = new(startProcess(request));
+                _sessions[profile.Name] = new(_startProcess(profile.Name, request));
                 return new(true, "Команда запуска передана. Готовность сервера ещё не подтверждена.");
             }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException
@@ -124,7 +138,14 @@ public sealed class ServerLaunches(Func<ProcessStartInfo, IServerLaunchProcess> 
     private ServerSessionStatus Observe(string profileName)
     {
         if (!_sessions.TryGetValue(profileName, out var session))
-            return ServerSessionStatus.NotObserved;
+        {
+            var recovered = _recover?.Invoke(profileName);
+            if (recovered is null)
+                return ServerSessionStatus.NotObserved;
+            if (recovered.Process is null)
+                return ServerSessionStatus.TrackingLost;
+            _sessions[profileName] = session = new(recovered.Process) { Status = recovered.Status };
+        }
 
         if (session.Process is { } process)
         {
@@ -140,6 +161,8 @@ public sealed class ServerLaunches(Func<ProcessStartInfo, IServerLaunchProcess> 
                     ServerSessionStatus.Stopping => ServerSessionStatus.StopUnconfirmed,
                     _ => ServerSessionStatus.StartupFailed,
                 };
+                if (session.Status != ServerSessionStatus.Stopped && process.TrackingLost)
+                    session.Status = ServerSessionStatus.TrackingLost;
                 process.Dispose();
             }
             else if (ready)
@@ -186,3 +209,5 @@ public sealed class ServerLaunches(Func<ProcessStartInfo, IServerLaunchProcess> 
         public ServerSessionStatus Status { get; set; } = ServerSessionStatus.Starting;
     }
 }
+
+internal sealed record RecoveredServerSession(IServerLaunchProcess? Process, ServerSessionStatus Status);
