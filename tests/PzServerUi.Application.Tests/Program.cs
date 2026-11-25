@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Net;
+using System.Net.Sockets;
 using PzServerUi.Application;
 
 using var sandbox = new TestDirectory();
@@ -100,7 +102,11 @@ var launcherPath = Path.Combine(launchFolder, "StartServer64.bat");
 const string forwardingScript = "@echo off\r\n\".\\jre64\\bin\\java.exe\" -Xmx2g zombie.network.GameServer -statistic 0 %1 %2\r\n";
 File.WriteAllText(launcherPath, forwardingScript);
 var namedConfig = Path.Combine(configDirectory, "Second world.ini");
-File.WriteAllText(namedConfig, "PublicName=Second\n");
+var fixturePorts = NewUdpPorts();
+var alphaSettings = $"PublicName=Alpha\nDefaultPort={fixturePorts[0]}\nUDPPort={fixturePorts[1]}\n";
+var namedSettings = $"PublicName=Second\nDefaultPort={fixturePorts[2]}\nUDPPort={fixturePorts[3]}\n";
+File.WriteAllText(alphaConfig, alphaSettings);
+File.WriteAllText(namedConfig, namedSettings);
 profiles.Refresh();
 profiles.Select("Second world");
 var namedProfile = profiles.Selected!;
@@ -128,8 +134,8 @@ processes[0].HasExited = true;
 Check(launches.Start(launchFolder, namedProfile).Started && requests.Count == 3,
     "A profile may launch again once its prior launcher has exited.");
 Check(File.ReadAllText(launcherPath) == forwardingScript
-    && File.ReadAllText(alphaConfig) == "PublicName=Alpha\n"
-    && File.ReadAllText(namedConfig) == "PublicName=Second\n", "Launching must not rewrite scripts or profiles.");
+    && File.ReadAllText(alphaConfig) == alphaSettings
+    && File.ReadAllText(namedConfig) == namedSettings, "Launching must not rewrite scripts or profiles.");
 Console.WriteLine("PASS: routes a dedicated launch to the selected profile and prevents duplicate requests");
 
 processes[2].HasExited = true;
@@ -153,6 +159,63 @@ if (OperatingSystem.IsWindows())
         "A UNC working directory must be rejected before invoking cmd.");
 }
 Console.WriteLine("PASS: refuses incompatible launchers and unsafe or incomplete requests");
+
+var portFixtureProcesses = new List<FakeLaunchProcess>();
+var portLaunches = new ServerLaunches(_ =>
+{
+    var process = new FakeLaunchProcess();
+    portFixtureProcesses.Add(process);
+    return process;
+});
+var portAlpha = profiles.Items.Single(item => item.Name == "alpha");
+var overlappingSettings = $"PublicName=Second\nDefaultPort={fixturePorts[2]}\nUDPPort={fixturePorts[0]}\n";
+File.WriteAllText(namedConfig, overlappingSettings);
+try
+{
+    Check(portLaunches.Start(launchFolder, portAlpha).Started, "The first profile must be able to start.");
+    var blocked = portLaunches.Start(launchFolder, namedProfile);
+    Check(!blocked.Started && blocked.Message.Contains($"UDP {fixturePorts[0]}") && portFixtureProcesses.Count == 1,
+        "A second launch must be rejected when its direct port overlaps the first profile's game port before it binds.");
+    Check(portLaunches.GetStatus(portAlpha) == ServerSessionStatus.Starting
+        && portFixtureProcesses[0].StopRequests == 0 && File.ReadAllText(alphaConfig) == alphaSettings
+        && File.ReadAllText(namedConfig) == overlappingSettings,
+        "A conflict must not affect the first session or rewrite either settings file.");
+    portFixtureProcesses[0].HasExited = true;
+    Check(portLaunches.Start(launchFolder, namedProfile).Started, "A confirmed exit must release its planned UDP ports.");
+    portFixtureProcesses[1].HasExited = true;
+
+    using var occupied = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+    var activePort = ((IPEndPoint)occupied.Client.LocalEndPoint!).Port;
+    var liveConflict = $"DefaultPort={activePort}\r\nUDPPort={(activePort == fixturePorts[3] ? fixturePorts[2] : fixturePorts[3])}\r\n";
+    File.WriteAllText(namedConfig, liveConflict);
+    blocked = portLaunches.Start(launchFolder, namedProfile);
+    Check(!blocked.Started && blocked.Message.Contains($"UDP {activePort}") && portFixtureProcesses.Count == 2
+        && File.ReadAllText(namedConfig) == liveConflict && occupied.Client.IsBound,
+        "A real occupied local UDP socket must block launch without changing the settings or the listening application.");
+
+    var invalidSettings = "DefaultPort=0\nUDPPort=70000\n";
+    File.WriteAllText(namedConfig, invalidSettings);
+    blocked = portLaunches.Start(launchFolder, namedProfile);
+    Check(!blocked.Started && blocked.Message.Contains("DefaultPort") && portFixtureProcesses.Count == 2
+        && File.ReadAllText(namedConfig) == invalidSettings,
+        "An uncheckable dynamic or malformed setting must not be silently replaced or passed to the launcher.");
+    File.WriteAllText(namedConfig, $"DefaultPort={fixturePorts[3]}\nUDPPort={fixturePorts[3]}\n");
+    blocked = portLaunches.Start(launchFolder, namedProfile);
+    Check(!blocked.Started && blocked.Message.Contains($"UDP {fixturePorts[3]}") && portFixtureProcesses.Count == 2,
+        "The two game endpoints must not use the same UDP port within one profile.");
+
+    File.WriteAllText(namedConfig, namedSettings);
+    File.WriteAllText(launcherPath, forwardingScript.Replace(" %1 %2", " -udpport 12000 %1 %2"));
+    blocked = portLaunches.Start(launchFolder, namedProfile);
+    Check(!blocked.Started && blocked.Message.Contains("переопределяет") && portFixtureProcesses.Count == 2,
+        "Do not promise a verified INI port when the launcher overrides it.");
+}
+finally
+{
+    File.WriteAllText(namedConfig, namedSettings);
+    File.WriteAllText(launcherPath, forwardingScript);
+}
+Console.WriteLine("PASS: occupied UDP and in-flight port reservations block launch without changing either profile");
 
 if (OperatingSystem.IsWindows())
 {
@@ -418,6 +481,22 @@ static async Task WaitUntil(Func<bool> condition, string message)
     {
         Check(timeout.Elapsed < TimeSpan.FromSeconds(10), message);
         await Task.Delay(25);
+    }
+}
+
+static int[] NewUdpPorts()
+{
+    var sockets = new List<UdpClient>();
+    try
+    {
+        for (var i = 0; i < 4; i++)
+            sockets.Add(new UdpClient(new IPEndPoint(IPAddress.Loopback, 0)));
+        return sockets.Select(socket => ((IPEndPoint)socket.Client.LocalEndPoint!).Port).ToArray();
+    }
+    finally
+    {
+        foreach (var socket in sockets)
+            socket.Dispose();
     }
 }
 

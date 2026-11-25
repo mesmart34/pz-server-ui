@@ -41,6 +41,9 @@ public sealed class ServerLaunches(Func<ProcessStartInfo, IServerLaunchProcess> 
     private static readonly Regex FixedServerOptions = new(
         @"(?:^|\s|[""=])(?:-servername\b|-cachedir\b|-Duser\.home=)",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex FixedPortOptions = new(
+        @"(?:^|\s|[""=])-(?:port|udpport)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     private readonly object _gate = new();
     private readonly Dictionary<string, Session> _sessions = new(StringComparer.OrdinalIgnoreCase);
@@ -154,8 +157,14 @@ public sealed class ServerLaunches(Func<ProcessStartInfo, IServerLaunchProcess> 
                 if (launcher is null)
                     return Reject("В выбранной установке не найден штатный файл запуска Dedicated Server.");
 
-                if (!ForwardsProfileName(Path.Combine(installationFolder, launcher)))
-                    return Reject("Панель не смогла подтвердить, что этот лаунчер принимает имя профиля. Запуск отменён.");
+                if (!ForwardsProfileName(Path.Combine(installationFolder, launcher), out var overridesPorts))
+                    return Reject(overridesPorts
+                        ? "Лаунчер переопределяет игровые UDP-порты. Панель не может проверить порты из файла настроек. Запуск отменён."
+                        : "Панель не смогла подтвердить, что этот лаунчер принимает имя профиля. Запуск отменён.");
+
+                var ports = ServerGamePorts.Read(profile.ConfigurationPath);
+                if (FindPortConflict(ports) is { } conflict)
+                    return Reject(conflict);
 
                 // The installation path is passed as the working directory, never interpreted by cmd.
                 var request = new ProcessStartInfo
@@ -165,7 +174,7 @@ public sealed class ServerLaunches(Func<ProcessStartInfo, IServerLaunchProcess> 
                     Arguments = $"/d /v:off /c .\\{launcher} -servername \"{profile.Name}\"",
                     UseShellExecute = false,
                 };
-                _sessions[profile.Name] = new(startProcess(request));
+                _sessions[profile.Name] = new(startProcess(request), ports);
                 return new(true, "Команда запуска передана. Готовность сервера ещё не подтверждена.");
             }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException
@@ -174,6 +183,29 @@ public sealed class ServerLaunches(Func<ProcessStartInfo, IServerLaunchProcess> 
                 return Reject($"Не удалось запустить профиль: {error.Message}");
             }
         }
+    }
+
+    private string? FindPortConflict(ServerGamePorts ports)
+    {
+        // Start holds _gate: another click cannot slip in before this session reserves its ports.
+        foreach (var (name, session) in _sessions)
+        {
+            var status = Observe(name);
+            if (status is not (ServerSessionStatus.Starting or ServerSessionStatus.Running
+                or ServerSessionStatus.Stopping or ServerSessionStatus.StopUnconfirmed))
+                continue;
+            if (session.Ports.Contains(ports.DefaultPort))
+                return $"UDP {ports.DefaultPort} уже используется или зарезервирован профилем «{name}». Запуск отменён.";
+            if (session.Ports.Contains(ports.UdpPort))
+                return $"UDP {ports.UdpPort} уже используется или зарезервирован профилем «{name}». Запуск отменён.";
+        }
+
+        var occupied = ServerGamePorts.ReadOccupiedUdpPorts();
+        var conflicts = new[] { ports.DefaultPort, ports.UdpPort }
+            .Where(occupied.Contains)
+            .Select(port => $"UDP {port}").ToArray();
+        return conflicts.Length == 0 ? null
+            : $"Заняты локальные порты: {string.Join(", ", conflicts)}. Запуск отменён.";
     }
 
     private ServerSessionStatus Observe(string profileName)
@@ -205,8 +237,9 @@ public sealed class ServerLaunches(Func<ProcessStartInfo, IServerLaunchProcess> 
         return session.Status;
     }
 
-    private static bool ForwardsProfileName(string path)
+    private static bool ForwardsProfileName(string path, out bool overridesPorts)
     {
+        overridesPorts = false;
         if (new FileInfo(path).Length > 64 * 1024)
             return false;
 
@@ -218,6 +251,11 @@ public sealed class ServerLaunches(Func<ProcessStartInfo, IServerLaunchProcess> 
         var forwards = false;
         foreach (var line in lines)
         {
+            if (FixedPortOptions.IsMatch(line))
+            {
+                overridesPorts = true;
+                return false;
+            }
             if (FixedServerOptions.IsMatch(line))
                 return false;
             if (!line.Contains("zombie.network.GameServer", StringComparison.OrdinalIgnoreCase))
@@ -235,9 +273,10 @@ public sealed class ServerLaunches(Func<ProcessStartInfo, IServerLaunchProcess> 
 
     private static ServerLaunchResult Reject(string message) => new(false, message);
 
-    private sealed class Session(IServerLaunchProcess process)
+    private sealed class Session(IServerLaunchProcess process, ServerGamePorts ports)
     {
         public IServerLaunchProcess? Process { get; set; } = process;
+        public ServerGamePorts Ports { get; } = ports;
         public ServerSessionStatus Status { get; set; } = ServerSessionStatus.Starting;
     }
 }
