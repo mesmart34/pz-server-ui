@@ -226,9 +226,8 @@ public partial class InstallationPage : ContentPage
         OverviewPanels.RowSpacing = narrow ? 10 : 0;
         Grid.SetRow(InstanceCard, narrow ? 1 : 0);
         Grid.SetColumn(InstanceCard, narrow ? 0 : 1);
-        TabsStrip.Spacing = width < 520 ? 0 : 10;
-        var tabPadding = width < 520 ? new Thickness(7, 5) : new Thickness(12, 5);
-        ShowOverviewButton.Padding = ShowProfileButton.Padding = ShowModsButton.Padding = ShowConsoleButton.Padding = tabPadding;
+        var detailsWidth = _compact ? width : width - sidebar;
+        TabsStrip.Spacing = detailsWidth < 440 ? 7 : 21;
     }
 
     private void ApplyHeroLayout(bool narrow, bool shortWindow)
@@ -461,6 +460,12 @@ public partial class InstallationPage : ContentPage
     private void OnShowModsClicked(object? sender, EventArgs e) => ShowPane(ModsPane);
     private void OnShowConsoleClicked(object? sender, EventArgs e) => ShowPane(ConsolePane);
 
+    private void OnTabHandlerChanged(object? sender, EventArgs e)
+    {
+        if (sender is Button { Handler.PlatformView: Microsoft.UI.Xaml.Controls.Button native })
+            native.Style = (Microsoft.UI.Xaml.Style)Microsoft.UI.Xaml.Application.Current.Resources["FlatServerTabStyle"];
+    }
+
     private void ShowPane(View pane)
     {
         OverviewPane.IsVisible = pane == OverviewPane;
@@ -468,10 +473,10 @@ public partial class InstallationPage : ContentPage
         ModsPane.IsVisible = pane == ModsPane;
         ConsolePane.IsVisible = pane == ConsolePane;
         DetailsScroll.IsVisible = !ConsolePane.IsVisible;
-        SetTab(ShowOverviewButton, OverviewUnderline, OverviewPane.IsVisible);
-        SetTab(ShowProfileButton, ProfileUnderline, ProfilePane.IsVisible);
-        SetTab(ShowModsButton, ModsUnderline, ModsPane.IsVisible);
-        SetTab(ShowConsoleButton, ConsoleUnderline, ConsolePane.IsVisible);
+        SetTab(ShowOverviewButton, OverviewUnderline, "grid", OverviewPane.IsVisible);
+        SetTab(ShowProfileButton, ProfileUnderline, "sliders", ProfilePane.IsVisible);
+        SetTab(ShowModsButton, ModsUnderline, "box", ModsPane.IsVisible);
+        SetTab(ShowConsoleButton, ConsoleUnderline, "terminal", ConsolePane.IsVisible);
         var framed = !OverviewPane.IsVisible;
         PaneFrame.Padding = framed ? new Thickness(12) : new Thickness(0);
         PaneFrame.StrokeThickness = framed ? 1 : 0;
@@ -489,10 +494,13 @@ public partial class InstallationPage : ContentPage
             RefreshSessionStatus(profile);
     }
 
-    private static void SetTab(Button button, BoxView underline, bool selected)
+    private static void SetTab(Button button, BoxView underline, string icon, bool selected)
     {
         underline.IsVisible = selected;
         button.TextColor = Color.FromArgb(selected ? "#D7B773" : "#ADB1A1");
+        var iconFile = selected ? $"design_{icon}.png" : $"design_{icon}_muted.png";
+        if (button.ImageSource is not FileImageSource image || image.File != iconFile)
+            button.ImageSource = ImageSource.FromFile(iconFile);
         SemanticProperties.SetDescription(button, selected ? $"{button.Text}, текущая вкладка" : button.Text);
     }
 

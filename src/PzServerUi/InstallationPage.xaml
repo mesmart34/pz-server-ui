@@ -51,9 +51,13 @@
             <Setter Property="BackgroundColor" Value="Transparent" />
             <Setter Property="TextColor" Value="#D7B773" />
         </Style>
-        <Style x:Key="Tab" TargetType="Button" BasedOn="{StaticResource Link}">
+        <Style x:Key="Tab" TargetType="Button">
+            <Setter Property="BackgroundColor" Value="Transparent" />
+            <Setter Property="BorderWidth" Value="0" />
+            <Setter Property="Padding" Value="2,0" />
             <Setter Property="FontSize" Value="13" />
-            <Setter Property="MinimumHeightRequest" Value="38" />
+            <Setter Property="FontAttributes" Value="Bold" />
+            <Setter Property="MinimumHeightRequest" Value="46" />
             <Setter Property="ContentLayout" Value="Left,7" />
         </Style>
         <Style x:Key="SectionTitle" TargetType="Label">
@@ -238,27 +242,27 @@
                             </Grid>
                         </Grid>
                     </Border>
-                    <Grid Grid.Row="2" RowDefinitions="Auto,2">
-                        <BoxView Grid.Row="1" Color="#30352A" HeightRequest="1" VerticalOptions="End" />
-                        <HorizontalStackLayout x:Name="TabsStrip" Spacing="10">
+                    <Grid Grid.Row="2">
+                        <BoxView Color="#30352A" HeightRequest="1" VerticalOptions="End" InputTransparent="True" />
+                        <HorizontalStackLayout x:Name="TabsStrip" Spacing="21">
                             <Grid RowDefinitions="Auto,2">
-                                <Button x:Name="ShowOverviewButton" Text="Обзор" ImageSource="design_grid.png"
-                                        Style="{StaticResource Tab}" Clicked="OnShowOverviewClicked" />
+                                <Button x:Name="ShowOverviewButton" Text="Обзор" Style="{StaticResource Tab}"
+                                        HandlerChanged="OnTabHandlerChanged" Clicked="OnShowOverviewClicked" />
                                 <BoxView x:Name="OverviewUnderline" Grid.Row="1" Color="#D7B773" />
                             </Grid>
                             <Grid RowDefinitions="Auto,2">
-                                <Button x:Name="ShowProfileButton" Text="Профиль" ImageSource="design_sliders.png"
-                                        Style="{StaticResource Tab}" Clicked="OnShowProfileClicked" />
+                                <Button x:Name="ShowProfileButton" Text="Профиль" Style="{StaticResource Tab}"
+                                        HandlerChanged="OnTabHandlerChanged" Clicked="OnShowProfileClicked" />
                                 <BoxView x:Name="ProfileUnderline" Grid.Row="1" Color="#D7B773" IsVisible="False" />
                             </Grid>
                             <Grid RowDefinitions="Auto,2">
-                                <Button x:Name="ShowModsButton" Text="Моды" ImageSource="design_box.png"
-                                        Style="{StaticResource Tab}" Clicked="OnShowModsClicked" />
+                                <Button x:Name="ShowModsButton" Text="Моды" Style="{StaticResource Tab}"
+                                        HandlerChanged="OnTabHandlerChanged" Clicked="OnShowModsClicked" />
                                 <BoxView x:Name="ModsUnderline" Grid.Row="1" Color="#D7B773" IsVisible="False" />
                             </Grid>
                             <Grid RowDefinitions="Auto,2">
-                                <Button x:Name="ShowConsoleButton" Text="Консоль" ImageSource="design_terminal.png"
-                                        Style="{StaticResource Tab}" Clicked="OnShowConsoleClicked" />
+                                <Button x:Name="ShowConsoleButton" Text="Консоль" Style="{StaticResource Tab}"
+                                        HandlerChanged="OnTabHandlerChanged" Clicked="OnShowConsoleClicked" />
                                 <BoxView x:Name="ConsoleUnderline" Grid.Row="1" Color="#D7B773" IsVisible="False" />
                             </Grid>
                         </HorizontalStackLayout>
