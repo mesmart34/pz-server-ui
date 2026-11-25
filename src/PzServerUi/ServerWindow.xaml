@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Window xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+        xmlns:local="clr-namespace:PzServerUi"
+        x:Class="PzServerUi.ServerWindow"
+        Title="PZ Server UI">
+    <Window.TitleBar>
+        <TitleBar x:Name="ServerTitleBar" Title="PZ Server UI" Subtitle="PROJECT ZOMBOID"
+                  Icon="design_server.png" HeightRequest="48"
+                  BackgroundColor="#191B16" ForegroundColor="#EFEEE5">
+            <TitleBar.TrailingContent>
+                <HorizontalStackLayout x:Name="LocalModeIndicator" Spacing="7" Margin="0,0,14,0"
+                                       VerticalOptions="Center" InputTransparent="True">
+                    <BoxView WidthRequest="7" HeightRequest="7" CornerRadius="4"
+                             Color="#A9C18E" VerticalOptions="Center" />
+                    <Label Text="Локальный режим" FontSize="12" TextColor="#ADB1A1" VerticalOptions="Center" />
+                </HorizontalStackLayout>
+            </TitleBar.TrailingContent>
+        </TitleBar>
+    </Window.TitleBar>
+    <local:InstallationPage />
+</Window>

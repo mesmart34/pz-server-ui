@@ -1,88 +1,348 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-             xmlns:profiles="clr-namespace:PzServerUi.Application;assembly=PzServerUi.Application"
+             xmlns:local="clr-namespace:PzServerUi"
              x:Class="PzServerUi.InstallationPage"
-             BackgroundColor="{AppThemeBinding Light=#F4F6F4, Dark=#171B18}">
-    <Grid Padding="24,20" RowDefinitions="Auto,Auto,*" RowSpacing="16">
-        <VerticalStackLayout Spacing="4">
-            <Label Text="ЛОКАЛЬНАЯ ПАНЕЛЬ • WINDOWS"
-                   FontAttributes="Bold"
-                   FontSize="12"
-                   TextColor="{AppThemeBinding Light=#355B43, Dark=#9DD4A9}" />
-            <Label Text="Серверы Project Zomboid"
-                   FontAttributes="Bold"
-                   FontSize="30"
-                   SemanticProperties.HeadingLevel="Level1" />
-        </VerticalStackLayout>
-        <Border Grid.Row="1" Padding="14,10"
-                    StrokeShape="RoundRectangle 12"
-                    Stroke="{AppThemeBinding Light=#C8D1C9, Dark=#49564B}"
-                    BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#232B25}">
-            <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="14">
-                <VerticalStackLayout Spacing="4">
-                    <Label Text="Установка Dedicated Server" FontAttributes="Bold" />
-                    <Label x:Name="SavedFolderLabel" Text="Папка пока не выбрана." LineBreakMode="CharacterWrap" />
-                </VerticalStackLayout>
-                <Button Grid.Column="1" x:Name="ChooseFolderButton" Text="Выбрать папку"
-                        VerticalOptions="Center" Clicked="OnChooseFolderClicked" />
-                <Label Grid.Row="1" Grid.ColumnSpan="2" x:Name="MessageLabel" IsVisible="False"
-                       Margin="0,8,0,0" LineBreakMode="WordWrap" />
-            </Grid>
-        </Border>
-        <Grid Grid.Row="2" ColumnDefinitions="2*,3*" ColumnSpacing="12">
-            <Border Padding="12"
-                    StrokeShape="RoundRectangle 12"
-                    Stroke="{AppThemeBinding Light=#C8D1C9, Dark=#49564B}"
-                    BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#232B25}">
-                <Grid RowDefinitions="Auto,Auto,*" RowSpacing="10">
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                        <Label Text="Профили" FontAttributes="Bold" FontSize="18"
+             BackgroundColor="#151713">
+    <ContentPage.Resources>
+        <Style TargetType="Label">
+            <Setter Property="TextColor" Value="#EFEEE5" />
+        </Style>
+        <Style x:Key="Muted" TargetType="Label">
+            <Setter Property="TextColor" Value="#ADB1A1" />
+        </Style>
+        <Style x:Key="Card" TargetType="Border">
+            <Setter Property="Stroke" Value="#30352A" />
+            <Setter Property="StrokeShape" Value="RoundRectangle 10" />
+            <Setter Property="BackgroundColor" Value="#1C1F19" />
+        </Style>
+        <Style x:Key="Action" TargetType="Button">
+            <Setter Property="CornerRadius" Value="7" />
+            <Setter Property="Padding" Value="12,5" />
+            <Setter Property="MinimumHeightRequest" Value="42" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontAttributes" Value="Bold" />
+            <Setter Property="BackgroundColor" Value="#282D24" />
+            <Setter Property="TextColor" Value="#EFEEE5" />
+        </Style>
+        <Style x:Key="ServerAction" TargetType="Button" BasedOn="{StaticResource Action}">
+            <Setter Property="MinimumHeightRequest" Value="44" />
+            <Setter Property="MinimumWidthRequest" Value="124" />
+            <Setter Property="Padding" Value="13,7" />
+            <Setter Property="BorderWidth" Value="1" />
+            <Setter Property="ContentLayout" Value="Left,7" />
+            <Style.Triggers>
+                <Trigger TargetType="Button" Property="IsEnabled" Value="False">
+                    <Setter Property="Opacity" Value=".55" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="Primary" TargetType="Button" BasedOn="{StaticResource ServerAction}">
+            <Setter Property="BackgroundColor" Value="#D7B773" />
+            <Setter Property="TextColor" Value="#252013" />
+            <Setter Property="BorderColor" Value="#D7B773" />
+        </Style>
+        <Style x:Key="Danger" TargetType="Button" BasedOn="{StaticResource ServerAction}">
+            <Setter Property="BackgroundColor" Value="#372824" />
+            <Setter Property="TextColor" Value="#ECA694" />
+            <Setter Property="BorderColor" Value="#66483E" />
+        </Style>
+        <Style x:Key="Link" TargetType="Button" BasedOn="{StaticResource Action}">
+            <Setter Property="BackgroundColor" Value="Transparent" />
+            <Setter Property="TextColor" Value="#D7B773" />
+        </Style>
+        <Style x:Key="Tab" TargetType="Button">
+            <Setter Property="BackgroundColor" Value="Transparent" />
+            <Setter Property="BorderWidth" Value="0" />
+            <Setter Property="Padding" Value="2,0" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontAttributes" Value="Bold" />
+            <Setter Property="MinimumHeightRequest" Value="46" />
+            <Setter Property="ContentLayout" Value="Left,7" />
+        </Style>
+        <Style x:Key="SectionTitle" TargetType="Label">
+            <Setter Property="FontAttributes" Value="Bold" />
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="VerticalOptions" Value="Center" />
+        </Style>
+        <Style x:Key="MetricValue" TargetType="Label">
+            <Setter Property="FontAttributes" Value="Bold" />
+            <Setter Property="FontSize" Value="19" />
+            <Setter Property="LineBreakMode" Value="TailTruncation" />
+        </Style>
+        <Style x:Key="InlineIcon" TargetType="Image">
+            <Setter Property="WidthRequest" Value="16" />
+            <Setter Property="HeightRequest" Value="16" />
+            <Setter Property="VerticalOptions" Value="Center" />
+            <Setter Property="InputTransparent" Value="True" />
+        </Style>
+        <Style x:Key="MetricLabel" TargetType="Label" BasedOn="{StaticResource Muted}">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="VerticalOptions" Value="Center" />
+        </Style>
+    </ContentPage.Resources>
+    <Grid RowDefinitions="Auto,*">
+        <Grid RowDefinitions="1,Auto,Auto" BackgroundColor="#191B16">
+            <BoxView Color="#30352A" />
+            <VerticalStackLayout Grid.Row="1" x:Name="CompactToolbar" IsVisible="False" Padding="13,7,13,5" Spacing="4">
+                <HorizontalStackLayout Spacing="6">
+                    <Button x:Name="ToggleProfilesButton" Text="Профили" Style="{StaticResource Action}"
+                            Clicked="OnToggleProfilesClicked" />
+                    <Button x:Name="CompactChooseFolderButton" Text="Установка" ImageSource="design_folder.png"
+                            ContentLayout="Left,6" Style="{StaticResource Action}" Clicked="OnChooseFolderClicked"
+                            SemanticProperties.Description="Выбрать папку Dedicated Server" />
+                </HorizontalStackLayout>
+                <Label x:Name="CompactFolderPath" FontSize="11" Style="{StaticResource Muted}" LineBreakMode="TailTruncation" />
+            </VerticalStackLayout>
+            <Label Grid.Row="2" x:Name="MessageLabel" IsVisible="False" Margin="14,6" LineBreakMode="WordWrap" />
+        </Grid>
+        <Grid Grid.Row="1" x:Name="WorkspaceLayout" ColumnDefinitions="248,*" SizeChanged="OnWorkspaceSizeChanged">
+            <Grid x:Name="ProfilesCard" BackgroundColor="#191C16" ColumnDefinitions="*,1">
+                <BoxView Grid.Column="1" Color="#30352A" />
+                <Grid Padding="15,16" RowDefinitions="Auto,Auto,Auto,*,Auto" RowSpacing="9">
+                    <Grid ColumnDefinitions="Auto,Auto,*,Auto" ColumnSpacing="7">
+                        <Label Text="Профили" FontAttributes="Bold" FontSize="14" Margin="5,0,0,0"
                                VerticalOptions="Center" SemanticProperties.HeadingLevel="Level2" />
-                        <Button Grid.Column="1" Text="Обновить" Clicked="OnRefreshProfilesClicked" />
+                        <Border Grid.Column="1" Padding="6,2" Stroke="#30352A" StrokeShape="RoundRectangle 5"
+                                BackgroundColor="#23271E" VerticalOptions="Center">
+                            <Label x:Name="ProfileCountLabel" Text="0" FontSize="11" Style="{StaticResource Muted}" />
+                        </Border>
+                        <Button Grid.Column="3" ImageSource="design_refresh.png" Style="{StaticResource Link}"
+                                Padding="8" Clicked="OnRefreshProfilesClicked"
+                                SemanticProperties.Description="Обновить список профилей" ToolTipProperties.Text="Обновить профили" />
                     </Grid>
-                    <Label Grid.Row="1" x:Name="ProfileListMessage" IsVisible="False" LineBreakMode="WordWrap" />
-                    <CollectionView Grid.Row="2" x:Name="ProfileList"
+                    <Border Grid.Row="1" Stroke="#30352A" StrokeShape="RoundRectangle 8" BackgroundColor="#171914">
+                        <Grid ColumnDefinitions="30,*">
+                            <Image Source="design_search.png" Style="{StaticResource InlineIcon}" HorizontalOptions="Center" />
+                            <Entry Grid.Column="1" x:Name="ProfileSearch" Placeholder="Найти профиль" TextChanged="OnProfileSearchChanged"
+                                   BackgroundColor="Transparent" SemanticProperties.Description="Поиск по имени профиля" />
+                        </Grid>
+                    </Border>
+                    <Label Grid.Row="2" x:Name="ProfileListMessage" IsVisible="False" FontSize="12" LineBreakMode="WordWrap" />
+                    <CollectionView Grid.Row="3" x:Name="ProfileList"
                                     SelectionMode="Single" SelectionChanged="OnProfileSelectionChanged">
+                        <CollectionView.ItemsLayout>
+                            <LinearItemsLayout Orientation="Vertical" ItemSpacing="4" />
+                        </CollectionView.ItemsLayout>
                         <CollectionView.ItemTemplate>
-                            <DataTemplate x:DataType="profiles:ServerProfile">
-                                <Grid Padding="10,8">
-                                    <Label Text="{Binding Name}" LineBreakMode="TailTruncation" />
-                                </Grid>
+                            <DataTemplate x:DataType="local:ProfileRow">
+                                <Border Padding="8,7" Stroke="Transparent" StrokeShape="RoundRectangle 8" MinimumHeightRequest="57">
+                                    <VisualStateManager.VisualStateGroups>
+                                        <VisualStateGroup Name="CommonStates">
+                                            <VisualState Name="Normal" />
+                                            <VisualState Name="Selected">
+                                                <VisualState.Setters>
+                                                    <Setter Property="BackgroundColor" Value="#292C20" />
+                                                    <Setter Property="Stroke" Value="#4C4C33" />
+                                                </VisualState.Setters>
+                                            </VisualState>
+                                        </VisualStateGroup>
+                                    </VisualStateManager.VisualStateGroups>
+                                  <Grid ColumnDefinitions="34,*,8" ColumnSpacing="8">
+                                    <Grid WidthRequest="34" HeightRequest="34" VerticalOptions="Center">
+                                        <Image Source="profile_server.png" Aspect="AspectFill" />
+                                        <Image Source="{Binding Cover}" Aspect="AspectFill" />
+                                    </Grid>
+                                    <VerticalStackLayout Grid.Column="1" Spacing="2" VerticalOptions="Center">
+                                        <Label Text="{Binding Name}" FontAttributes="Bold" FontSize="13" LineBreakMode="TailTruncation" />
+                                        <Label Text="{Binding Status}" Style="{StaticResource Muted}" FontSize="11"
+                                               LineBreakMode="TailTruncation" />
+                                    </VerticalStackLayout>
+                                    <BoxView Grid.Column="2" Color="{Binding StatusColor}" WidthRequest="7" HeightRequest="7"
+                                             CornerRadius="4" VerticalOptions="Center" />
+                                  </Grid>
+                                </Border>
                             </DataTemplate>
                         </CollectionView.ItemTemplate>
                     </CollectionView>
+                    <Border Grid.Row="4" Style="{StaticResource Card}" Padding="10" BackgroundColor="#1E211A">
+                        <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="33,*" ColumnSpacing="8" RowSpacing="3">
+                            <Border Stroke="#30352A" BackgroundColor="#23271E" StrokeShape="RoundRectangle 7"
+                                    HeightRequest="33" WidthRequest="33" VerticalOptions="Start">
+                                <Image Source="design_folder.png" Style="{StaticResource InlineIcon}" HorizontalOptions="Center" />
+                            </Border>
+                            <VerticalStackLayout Grid.Column="1" Spacing="2">
+                                <Label Text="Dedicated Server" FontSize="12" FontAttributes="Bold" />
+                                <Label x:Name="SavedFolderLabel" Text="Папка пока не выбрана" Style="{StaticResource Muted}"
+                                       FontSize="11" MaxLines="2" LineBreakMode="TailTruncation" />
+                            </VerticalStackLayout>
+                            <Button Grid.Row="1" Grid.ColumnSpan="2" x:Name="ChooseFolderButton"
+                                    Text="Настроить установку  →" Style="{StaticResource Link}" HorizontalOptions="Start"
+                                    Clicked="OnChooseFolderClicked" />
+                        </Grid>
+                    </Border>
                 </Grid>
-            </Border>
-            <Border Grid.Column="1" Padding="16"
-                    StrokeShape="RoundRectangle 12"
-                    Stroke="{AppThemeBinding Light=#C8D1C9, Dark=#49564B}"
-                    BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#232B25}">
-                <ScrollView>
-                    <VerticalStackLayout Spacing="10">
-                        <Label Text="Выбранный экземпляр" FontAttributes="Bold" FontSize="18"
-                               SemanticProperties.HeadingLevel="Level2" />
-                        <Label x:Name="ProfileDetailsPlaceholder" Text="Выбери профиль в списке слева." />
-                        <VerticalStackLayout x:Name="ProfileDetails" IsVisible="False" Spacing="10">
-                            <Label x:Name="ProfileNameLabel" FontAttributes="Bold" FontSize="24"
-                                   LineBreakMode="CharacterWrap" />
-                            <Label x:Name="SessionStatusLabel" FontAttributes="Bold" LineBreakMode="WordWrap" />
-                            <HorizontalStackLayout Spacing="8">
-                                <Button x:Name="StartServerButton" Text="Запустить" Clicked="OnStartServerClicked" />
-                                <Button x:Name="StopServerButton" Text="Остановить" Clicked="OnStopServerClicked" />
-                            </HorizontalStackLayout>
-                            <Label x:Name="LaunchMessageLabel" IsVisible="False" LineBreakMode="WordWrap" />
-                            <FlexLayout Wrap="Wrap">
-                                <Button x:Name="ShowProfileButton" Text="Профиль" Clicked="OnShowProfileClicked"
-                                        IsEnabled="False" Margin="0,0,8,4" />
-                                <Button x:Name="ShowSettingsButton" Text="Настройки" Clicked="OnShowSettingsClicked"
-                                        Margin="0,0,8,4" />
-                                <Button x:Name="ShowModsButton" Text="Моды" Clicked="OnShowModsClicked"
-                                        Margin="0,0,8,4" />
-                                <Button x:Name="ShowConsoleButton" Text="Консоль" Clicked="OnShowConsoleClicked"
-                                        Margin="0,0,0,4" />
-                            </FlexLayout>
-                            <VerticalStackLayout x:Name="ProfilePane" Spacing="6">
+            </Grid>
+            <Grid Grid.Column="1" x:Name="DetailsArea" Padding="26,18,26,16">
+                <Label x:Name="ProfileDetailsPlaceholder" Text="Выбери профиль." Margin="14" />
+                <Grid x:Name="ProfileDetails" IsVisible="False" RowDefinitions="Auto,Auto,Auto,*" RowSpacing="11">
+                    <Label x:Name="ProfileBreadcrumb" FontSize="12" Style="{StaticResource Muted}"
+                           LineBreakMode="TailTruncation" />
+                    <Border Grid.Row="1" x:Name="ProfileHero" MinimumHeightRequest="218" Stroke="#3B4032"
+                            StrokeShape="RoundRectangle 12" BackgroundColor="#24291F">
+                        <Grid>
+                            <Image x:Name="SelectedCover" Aspect="AspectFill" />
+                            <Grid InputTransparent="True">
+                                <Grid.Background>
+                                    <LinearGradientBrush StartPoint="0,0.65" EndPoint="1,0.25">
+                                        <GradientStop Color="#1B1E16" Offset="0" />
+                                        <GradientStop Color="#F21B1E16" Offset=".34" />
+                                        <GradientStop Color="#941C2118" Offset=".76" />
+                                        <GradientStop Color="#44232A20" Offset="1" />
+                                    </LinearGradientBrush>
+                                </Grid.Background>
+                            </Grid>
+                            <Grid x:Name="HeroContent" Padding="24,19" RowDefinitions="*,Auto,Auto,Auto"
+                                  ColumnDefinitions="*,Auto" ColumnSpacing="12" RowSpacing="5">
+                                <VerticalStackLayout Grid.Row="1" Spacing="7" VerticalOptions="End">
+                                    <Label Text="ВЫДЕЛЕННЫЙ СЕРВЕР" FontFamily="Consolas" FontSize="11" CharacterSpacing="1.4"
+                                           FontAttributes="Bold" TextColor="#D7B773" />
+                                    <Label x:Name="ProfileNameLabel" FontAttributes="Bold" FontSize="36"
+                                           MaxLines="2" LineBreakMode="TailTruncation" SemanticProperties.HeadingLevel="Level2" />
+                                    <Border x:Name="SessionPill" Padding="8,4" Stroke="#404338" StrokeShape="RoundRectangle 5"
+                                            BackgroundColor="#282C24" HorizontalOptions="Start">
+                                        <Grid ColumnDefinitions="7,*" ColumnSpacing="6">
+                                            <BoxView x:Name="SessionDot" WidthRequest="7" HeightRequest="7" CornerRadius="4"
+                                                     Color="#9A9C90" VerticalOptions="Center" />
+                                            <Label Grid.Column="1" x:Name="SessionStatusLabel" FontAttributes="Bold" FontSize="11" LineBreakMode="WordWrap" />
+                                        </Grid>
+                                    </Border>
+                                </VerticalStackLayout>
+                                <Grid x:Name="HeroActions" Grid.Row="1" Grid.Column="1" ColumnDefinitions="Auto,Auto"
+                                      RowDefinitions="Auto,Auto" ColumnSpacing="14" VerticalOptions="End" HorizontalOptions="End">
+                                    <Button x:Name="StartServerButton" Text="Запустить" ImageSource="design_play.png"
+                                            Clicked="OnStartServerClicked" Style="{StaticResource Primary}" />
+                                    <Button Grid.Column="1" x:Name="StopServerButton" Text="Остановить" ImageSource="design_stop.png"
+                                            Clicked="OnStopServerClicked" Style="{StaticResource Danger}" />
+                                </Grid>
+                                <Label Grid.Row="3" Grid.ColumnSpan="2" x:Name="StopHint" FontSize="11" TextColor="#D3D4C5"
+                                       IsVisible="False" LineBreakMode="WordWrap" />
+                            </Grid>
+                        </Grid>
+                    </Border>
+                    <Grid Grid.Row="2">
+                        <BoxView Color="#30352A" HeightRequest="1" VerticalOptions="End" InputTransparent="True" />
+                        <HorizontalStackLayout x:Name="TabsStrip" Spacing="21">
+                            <Grid RowDefinitions="Auto,2">
+                                <Button x:Name="ShowOverviewButton" Text="Обзор" Style="{StaticResource Tab}"
+                                        HandlerChanged="OnTabHandlerChanged" Clicked="OnShowOverviewClicked" />
+                                <BoxView x:Name="OverviewUnderline" Grid.Row="1" Color="#D7B773" />
+                            </Grid>
+                            <Grid RowDefinitions="Auto,2">
+                                <Button x:Name="ShowProfileButton" Text="Профиль" Style="{StaticResource Tab}"
+                                        HandlerChanged="OnTabHandlerChanged" Clicked="OnShowProfileClicked" />
+                                <BoxView x:Name="ProfileUnderline" Grid.Row="1" Color="#D7B773" IsVisible="False" />
+                            </Grid>
+                            <Grid RowDefinitions="Auto,2">
+                                <Button x:Name="ShowModsButton" Text="Моды" Style="{StaticResource Tab}"
+                                        HandlerChanged="OnTabHandlerChanged" Clicked="OnShowModsClicked" />
+                                <BoxView x:Name="ModsUnderline" Grid.Row="1" Color="#D7B773" IsVisible="False" />
+                            </Grid>
+                            <Grid RowDefinitions="Auto,2">
+                                <Button x:Name="ShowConsoleButton" Text="Консоль" Style="{StaticResource Tab}"
+                                        HandlerChanged="OnTabHandlerChanged" Clicked="OnShowConsoleClicked" />
+                                <BoxView x:Name="ConsoleUnderline" Grid.Row="1" Color="#D7B773" IsVisible="False" />
+                            </Grid>
+                        </HorizontalStackLayout>
+                    </Grid>
+                    <Grid Grid.Row="3" RowDefinitions="Auto,*" RowSpacing="7">
+                        <Border x:Name="LaunchNotice" IsVisible="False" Padding="12,8" Stroke="#554A32"
+                                StrokeShape="RoundRectangle 8" BackgroundColor="#28251B">
+                            <Label x:Name="LaunchMessageLabel" TextColor="#E7D6B5" FontSize="12" LineBreakMode="WordWrap" />
+                        </Border>
+                    <Border Grid.Row="1" x:Name="PaneFrame" StrokeThickness="0" Padding="0" StrokeShape="RoundRectangle 12">
+                        <Grid>
+                        <ScrollView x:Name="DetailsScroll">
+                          <VerticalStackLayout Spacing="10">
+                            <VerticalStackLayout x:Name="OverviewPane" Spacing="12">
+                                <Border x:Name="OverviewNoticeCard" IsVisible="False" Padding="12,8" Stroke="#554A32"
+                                        StrokeShape="RoundRectangle 8" BackgroundColor="#28251B">
+                                    <Label x:Name="OverviewNotice" TextColor="#E7D6B5" FontSize="12" LineBreakMode="WordWrap" />
+                                </Border>
+                                <Grid x:Name="OverviewMetrics" ColumnDefinitions="*,*,*,*" RowDefinitions="Auto,Auto" ColumnSpacing="10">
+                                    <Border Style="{StaticResource Card}" Padding="12,10">
+                                        <VerticalStackLayout Spacing="4">
+                                            <Grid ColumnDefinitions="16,*" ColumnSpacing="7">
+                                                <Image Source="design_clock.png" Style="{StaticResource InlineIcon}" />
+                                                <Label Grid.Column="1" Text="Сеанс" Style="{StaticResource MetricLabel}" />
+                                            </Grid>
+                                            <Label x:Name="OverviewSession" Style="{StaticResource MetricValue}" />
+                                            <Label x:Name="OverviewSessionHint" FontSize="11" Style="{StaticResource Muted}" LineBreakMode="WordWrap" />
+                                        </VerticalStackLayout>
+                                    </Border>
+                                    <Border Grid.Column="1" Style="{StaticResource Card}" Padding="12,10">
+                                        <VerticalStackLayout Spacing="4">
+                                            <Grid ColumnDefinitions="16,*" ColumnSpacing="7">
+                                                <Image Source="design_users.png" Style="{StaticResource InlineIcon}" />
+                                                <Label Grid.Column="1" Text="Лимит игроков" Style="{StaticResource MetricLabel}" />
+                                            </Grid>
+                                            <Label x:Name="OverviewLimit" Style="{StaticResource MetricValue}" />
+                                            <Label Text="По настройкам профиля" FontSize="11" Style="{StaticResource Muted}" />
+                                        </VerticalStackLayout>
+                                    </Border>
+                                    <Border x:Name="PortsCard" Grid.Column="2" Style="{StaticResource Card}" Padding="12,10">
+                                        <VerticalStackLayout Spacing="4">
+                                            <Grid ColumnDefinitions="16,*" ColumnSpacing="7">
+                                                <Image Source="design_plug.png" Style="{StaticResource InlineIcon}" />
+                                                <Label Grid.Column="1" Text="Игровой UDP" Style="{StaticResource MetricLabel}" />
+                                            </Grid>
+                                            <Label x:Name="OverviewPorts" Style="{StaticResource MetricValue}" />
+                                            <Label Text="По настройкам профиля" FontSize="11" Style="{StaticResource Muted}" />
+                                        </VerticalStackLayout>
+                                    </Border>
+                                    <Border x:Name="ModsCard" Grid.Column="3" Style="{StaticResource Card}" Padding="12,10">
+                                        <VerticalStackLayout Spacing="4">
+                                            <Grid ColumnDefinitions="16,*" ColumnSpacing="7">
+                                                <Image Source="design_box.png" Style="{StaticResource InlineIcon}" />
+                                                <Label Grid.Column="1" Text="Моды" Style="{StaticResource MetricLabel}" />
+                                            </Grid>
+                                            <Label x:Name="OverviewModCount" Style="{StaticResource MetricValue}" />
+                                            <Label Text="Mod ID в профиле" FontSize="11" Style="{StaticResource Muted}" />
+                                        </VerticalStackLayout>
+                                    </Border>
+                                </Grid>
+                                <Grid x:Name="OverviewPanels" ColumnDefinitions="3*,2*" RowDefinitions="Auto,Auto"
+                                      ColumnSpacing="12" RowSpacing="0">
+                                    <Border Style="{StaticResource Card}" Padding="13" VerticalOptions="Start">
+                                        <VerticalStackLayout Spacing="6">
+                                            <Grid ColumnDefinitions="16,*,Auto" ColumnSpacing="7">
+                                                <Image Source="design_terminal.png" Style="{StaticResource InlineIcon}" />
+                                                <Label Grid.Column="1" Text="Последние записи" Style="{StaticResource SectionTitle}" SemanticProperties.HeadingLevel="Level3" />
+                                                <Button Grid.Column="2" Text="В консоль  →" Style="{StaticResource Link}" Clicked="OnShowConsoleClicked" />
+                                            </Grid>
+                                            <Border Stroke="#2D3428" StrokeShape="RoundRectangle 7" BackgroundColor="#131611" Padding="10">
+                                                <Label x:Name="OverviewLog" FontFamily="Consolas" FontSize="11"
+                                                       LineBreakMode="TailTruncation" MaxLines="4" />
+                                            </Border>
+                                        </VerticalStackLayout>
+                                    </Border>
+                                    <Border x:Name="InstanceCard" Grid.Column="1" Style="{StaticResource Card}" Padding="13" VerticalOptions="Start">
+                                        <VerticalStackLayout Spacing="6">
+                                            <Grid ColumnDefinitions="16,*,Auto" ColumnSpacing="7">
+                                                <Image Source="design_info.png" Style="{StaticResource InlineIcon}" />
+                                                <Label Grid.Column="1" Text="Данные экземпляра" Style="{StaticResource SectionTitle}" SemanticProperties.HeadingLevel="Level3" />
+                                                <Button Grid.Column="2" Text="Профиль  →" Style="{StaticResource Link}" Clicked="OnShowProfileClicked" />
+                                            </Grid>
+                                            <Grid ColumnDefinitions="65,*" RowDefinitions="Auto,1,Auto,1,Auto,1,Auto" RowSpacing="5">
+                                                <Label Text="Профиль" Style="{StaticResource Muted}" FontSize="12" />
+                                                <Label Grid.Column="1" x:Name="OverviewProfileName" FontSize="12" LineBreakMode="CharacterWrap" HorizontalTextAlignment="End" />
+                                                <BoxView Grid.Row="1" Grid.ColumnSpan="2" Color="#30352A" />
+                                                <Label Grid.Row="2" Text="Мир" Style="{StaticResource Muted}" FontSize="12" />
+                                                <Label Grid.Row="2" Grid.Column="1" x:Name="OverviewWorld" FontSize="12" LineBreakMode="CharacterWrap" HorizontalTextAlignment="End" />
+                                                <BoxView Grid.Row="3" Grid.ColumnSpan="2" Color="#30352A" />
+                                                <Label Grid.Row="4" Text="PVP" Style="{StaticResource Muted}" FontSize="12" />
+                                                <Label Grid.Row="4" Grid.Column="1" x:Name="OverviewPvp" FontSize="12" HorizontalTextAlignment="End" />
+                                                <BoxView Grid.Row="5" Grid.ColumnSpan="2" Color="#30352A" />
+                                                <Label Grid.Row="6" Text="Запуск" Style="{StaticResource Muted}" FontSize="12" />
+                                                <Label Grid.Row="6" Grid.Column="1" x:Name="OverviewLaunchSource" FontSize="12"
+                                                       LineBreakMode="WordWrap" HorizontalTextAlignment="End" />
+                                            </Grid>
+                                        </VerticalStackLayout>
+                                    </Border>
+                                </Grid>
+                            </VerticalStackLayout>
+                            <VerticalStackLayout x:Name="ProfilePane" IsVisible="False" Spacing="6">
+                                <Label x:Name="PendingSettingsLabel" IsVisible="False" FontAttributes="Bold" LineBreakMode="WordWrap" />
                                 <Label Text="Файл настроек" FontAttributes="Bold" />
                                 <Label x:Name="ProfileConfigurationLabel" LineBreakMode="CharacterWrap" />
                                 <Label Text="Папка мира" FontAttributes="Bold" />
@@ -110,10 +370,13 @@
                                     <Button Text="Перечитать файл" Margin="0,0,0,4" Clicked="OnReloadSandboxClicked" />
                                 </FlexLayout>
                                 <Label x:Name="SandboxMessage" IsVisible="False" LineBreakMode="WordWrap" />
-                            </VerticalStackLayout>
-                            <VerticalStackLayout x:Name="SettingsPane" IsVisible="False" Spacing="8">
-                                <Label Text="Основные настройки" FontSize="18" FontAttributes="Bold"
-                                       SemanticProperties.HeadingLevel="Level2" />
+                                <BoxView Margin="0,8" HeightRequest="1"
+                                         Color="{AppThemeBinding Light=#CFD4C3, Dark=#34392E}" />
+                                <HorizontalStackLayout Spacing="8">
+                                    <Image Source="design_sliders.png" Style="{StaticResource InlineIcon}" />
+                                    <Label Text="Основные настройки" Style="{StaticResource SectionTitle}"
+                                           SemanticProperties.HeadingLevel="Level2" />
+                                </HorizontalStackLayout>
                                 <Label Text="Изменения применяются при следующем запуске. Сохранение не перезапускает сервер."
                                        LineBreakMode="WordWrap" />
                                 <VerticalStackLayout x:Name="BasicFields" IsVisible="False" Spacing="5">
@@ -140,10 +403,15 @@
                                 <Label x:Name="BasicMessage" IsVisible="False" LineBreakMode="WordWrap" />
                             </VerticalStackLayout>
                             <VerticalStackLayout x:Name="ModsPane" IsVisible="False" Spacing="8">
-                                <Label Text="Моды выбранного профиля" FontSize="18" FontAttributes="Bold"
-                                       SemanticProperties.HeadingLevel="Level2" />
+                                <HorizontalStackLayout Spacing="8">
+                                    <Image Source="design_box.png" Style="{StaticResource InlineIcon}" />
+                                    <Label Text="Моды выбранного профиля" Style="{StaticResource SectionTitle}"
+                                           SemanticProperties.HeadingLevel="Level2" />
+                                </HorizontalStackLayout>
                                 <Label Text="Список из INI. Он не показывает, какие моды загружены в текущем сеансе."
                                        LineBreakMode="WordWrap" />
+                                <Entry x:Name="ModSearch" Placeholder="Найти Mod ID или Workshop ID" TextChanged="OnModSearchChanged"
+                                       SemanticProperties.Description="Поиск по идентификаторам модов" />
                                 <VerticalStackLayout x:Name="ModLists" Spacing="5">
                                     <Label Text="Mod ID (Mods)" FontAttributes="Bold" SemanticProperties.HeadingLevel="Level3" />
                                     <Label x:Name="ModIdsLabel" LineBreakMode="CharacterWrap" />
@@ -153,28 +421,50 @@
                                 </VerticalStackLayout>
                                 <Label x:Name="ModsReadError" IsVisible="False" LineBreakMode="WordWrap" />
                             </VerticalStackLayout>
-                            <VerticalStackLayout x:Name="ConsolePane" IsVisible="False" Spacing="6">
-                                <Editor x:Name="ConsoleOutput" IsReadOnly="True" HeightRequest="280"
-                                        FontFamily="Consolas" FontSize="12" Placeholder="Вывод сеанса пока отсутствует."
-                                        SemanticProperties.Description="Вывод выбранного сервера" />
-                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                          </VerticalStackLayout>
+                        </ScrollView>
+                            <Grid x:Name="ConsolePane" IsVisible="False" RowDefinitions="Auto,*,Auto,Auto,Auto" RowSpacing="5">
+                                <VerticalStackLayout Spacing="6">
+                                    <HorizontalStackLayout Spacing="8">
+                                        <Image Source="design_terminal.png" Style="{StaticResource InlineIcon}" />
+                                        <Label Text="Журнал сеанса" Style="{StaticResource SectionTitle}" SemanticProperties.HeadingLevel="Level2" />
+                                    </HorizontalStackLayout>
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                                        <Entry x:Name="ConsoleSearch" Placeholder="Поиск по журналу" TextChanged="OnConsoleSearchChanged"
+                                               SemanticProperties.Description="Поиск по журналу выбранного сеанса" />
+                                        <Picker Grid.Column="1" x:Name="ConsoleLevelPicker" Title="Все уровни"
+                                                SelectedIndexChanged="OnConsoleLevelChanged"
+                                                SemanticProperties.Description="Фильтр журнала по уровню" />
+                                    </Grid>
+                                </VerticalStackLayout>
+                                <Border Grid.Row="1" Stroke="#2D3428" StrokeShape="RoundRectangle 7" BackgroundColor="#131611" Padding="5">
+                                    <Editor x:Name="ConsoleOutput" IsReadOnly="True" BackgroundColor="Transparent"
+                                            FontFamily="Consolas" FontSize="12" Placeholder="В журнале пока нет строк."
+                                            SemanticProperties.Description="Вывод выбранного сервера" />
+                                </Border>
+                                <Grid Grid.Row="2" ColumnDefinitions="*,Auto" ColumnSpacing="8">
                                     <Entry x:Name="ConsoleInput" Placeholder="Команда или ответ сервера"
                                            MaxLength="1024" IsPassword="True" IsTextPredictionEnabled="False"
                                            IsSpellCheckEnabled="False" Completed="OnSendConsoleClicked" />
                                     <Button Grid.Column="1" x:Name="SendConsoleButton" Text="Отправить"
                                             Clicked="OnSendConsoleClicked" />
                                 </Grid>
-                                <HorizontalStackLayout Spacing="4">
+                                <HorizontalStackLayout Grid.Row="3" Spacing="4">
                                     <CheckBox x:Name="MaskConsoleInput" IsChecked="True" CheckedChanged="OnMaskConsoleChanged"
                                               SemanticProperties.Description="Скрывать ввод" />
                                     <Label Text="Скрывать ввод (для паролей)" VerticalOptions="Center" />
                                 </HorizontalStackLayout>
-                                <Label x:Name="ConsoleMessage" IsVisible="False" LineBreakMode="WordWrap" />
-                            </VerticalStackLayout>
-                        </VerticalStackLayout>
-                    </VerticalStackLayout>
-                </ScrollView>
-            </Border>
+                                <VerticalStackLayout Grid.Row="4" Spacing="2">
+                                    <Label Text="Последние строки живого журнала выбранного сеанса" FontSize="11"
+                                           Style="{StaticResource Muted}" LineBreakMode="WordWrap" />
+                                    <Label x:Name="ConsoleMessage" IsVisible="False" LineBreakMode="WordWrap" />
+                                </VerticalStackLayout>
+                            </Grid>
+                        </Grid>
+                    </Border>
+                    </Grid>
+                </Grid>
+            </Grid>
         </Grid>
     </Grid>
 </ContentPage>

@@ -12,6 +12,23 @@ if (args is ["zombie.network.GameServer", "-servername", _, "--external-discover
 }
 
 using var sandbox = new TestDirectory();
+var externalPresentation = OverviewQueries.Describe(ServerSessionStatus.Stopped, ExternalServerStatus.ProcessObserved, true);
+Check(externalPresentation.Tone == StatusTone.Attention && externalPresentation.StopHint is not null
+    && externalPresentation.Detail.Contains("Готовность не подтверждена"),
+    "An external process is not ready and has a stop explanation.");
+var runningPresentation = OverviewQueries.Describe(ServerSessionStatus.Running, ExternalServerStatus.Ambiguous, true);
+Check(runningPresentation.Tone == StatusTone.Ready && runningPresentation.StopHint is null,
+    "A confirmed owned session takes precedence over external observations.");
+Check(OverviewQueries.Matches("Bravo", " bRa ") && !OverviewQueries.Matches("alpha", "bRa"),
+    "Profile and mod search ignores case and surrounding whitespace.");
+const string overviewLog = "LOG  : Network > Boot\r\nWARN : Lua > missing mod\r\nERROR: Lua > Missing entry\r\nstack: details";
+Check(OverviewQueries.FilterLog(overviewLog, null, ConsoleLogLevel.All) == overviewLog,
+    "Unfiltered logs must preserve all text.");
+Check(OverviewQueries.FilterLog(overviewLog, " MISSING ", ConsoleLogLevel.Warn) == "WARN : Lua > missing mod"
+    && OverviewQueries.FilterLog(overviewLog, null, ConsoleLogLevel.Unknown) == "stack: details",
+    "Console filters combine known levels and search without assigning a level to unstructured text.");
+Console.WriteLine("PASS: overview status and profile, mod and console filters");
+
 Environment.SetEnvironmentVariable("LOCALAPPDATA", sandbox.Path);
 var folder = Directory.CreateDirectory(Path.Combine(sandbox.Path, "Dedicated Server")).FullName;
 File.WriteAllText(Path.Combine(folder, "StartServer64.bat"), "@echo off\r\n");

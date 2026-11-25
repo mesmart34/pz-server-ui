@@ -5,8 +5,11 @@ namespace PzServerUi;
 
 public partial class App : Microsoft.Maui.Controls.Application
 {
-    public App() => InitializeComponent();
+    public App()
+    {
+        InitializeComponent();
+        UserAppTheme = AppTheme.Dark;
+    }
 
-    protected override Window CreateWindow(IActivationState? activationState) =>
-        new(new InstallationPage()) { Title = "PZ Server UI" };
+    protected override Window CreateWindow(IActivationState? activationState) => new ServerWindow();
 }
