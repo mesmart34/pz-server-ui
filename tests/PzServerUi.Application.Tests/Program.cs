@@ -209,6 +209,34 @@ Check(sessions.GetStatus(alphaProfile) == ServerSessionStatus.StartupFailed,
     "A readiness signal must not turn an already exited launcher into a running session.");
 Console.WriteLine("PASS: observes startup and exit by session, never borrowing or reusing readiness");
 
+Check(sessions.Start(launchFolder, namedProfile).Started && sessions.Start(launchFolder, alphaProfile).Started,
+    "Two independently tracked profiles should start.");
+var target = sessionProcesses[^2];
+var neighbor = sessionProcesses[^1];
+target.ReadinessConfirmed = neighbor.ReadinessConfirmed = true;
+Check(sessions.RequestStop(namedProfile).Accepted && target.StopRequests == 1 && neighbor.StopRequests == 0,
+    "A graceful stop must be sent only to the selected owned session.");
+Check(sessions.GetStatus(namedProfile) == ServerSessionStatus.Stopping
+    && sessions.GetStatus(alphaProfile) == ServerSessionStatus.Running
+    && !sessions.RequestStop(namedProfile).Accepted && target.StopRequests == 1
+    && !sessions.Start(launchFolder, namedProfile).Started,
+    "An accepted stop is pending and may not be repeatedly sent while the process is alive.");
+target.HasExited = true;
+Check(sessions.GetStatus(namedProfile) == ServerSessionStatus.Stopped
+    && sessions.GetStatus(alphaProfile) == ServerSessionStatus.Running,
+    "A requested stop is confirmed only by the selected process exiting.");
+Check(!sessions.RequestStop(namedProfile).Accepted, "An exited process must not receive a stop command.");
+Check(sessions.Start(launchFolder, namedProfile).Started
+    && sessions.GetStatus(namedProfile) == ServerSessionStatus.Starting,
+    "The same profile can restart after confirmed exit without reusing old session state.");
+neighbor.ExitConfirmed = false;
+Check(sessions.RequestStop(alphaProfile).Accepted, "The second running session should now accept its own request.");
+neighbor.HasExited = true;
+Check(sessions.GetStatus(alphaProfile) == ServerSessionStatus.StopUnconfirmed
+    && !sessions.Start(launchFolder, alphaProfile).Started,
+    "Unexpected relay exit must not be called a graceful stop or allow a duplicate start.");
+Console.WriteLine("PASS: requests a graceful stop only for the selected session and observes its exit");
+
 if (OperatingSystem.IsWindows())
 {
     var exitProbeDirectory = Directory.CreateDirectory(Path.Combine(sandbox.Path, "Early exit probe")).FullName;
@@ -265,6 +293,53 @@ if (OperatingSystem.IsWindows())
             await Task.Delay(25);
     }
     Console.WriteLine("PASS: exact Windows network readiness output belongs only to the launcher that printed it");
+
+    var stopProbeDirectory = Directory.CreateDirectory(Path.Combine(sandbox.Path, "Stop probe & spaces")).FullName;
+    var receivedCommand = Path.Combine(stopProbeDirectory, "command.txt");
+    var releaseStop = Path.Combine(stopProbeDirectory, "exit.flag");
+    File.WriteAllText(Path.Combine(stopProbeDirectory, "StartServer64.bat"), ("""
+        @echo off
+        "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File .\receive.ps1
+        pause
+        exit /b 0
+
+        """ + forwardingScript).ReplaceLineEndings("\r\n"));
+    File.WriteAllText(Path.Combine(stopProbeDirectory, "receive.ps1"), """
+        Write-Output 'LOG  : Network      f:0 st:775,941,047> *** SERVER STARTED ****'
+        $stream = [IO.StreamReader]::new([Console]::OpenStandardInput())
+        $line = $stream.ReadLineAsync()
+        if (!$line.Wait(12000)) { exit 1 }
+        [IO.File]::WriteAllText((Join-Path $PWD 'command.txt'), [string]$line.Result)
+        $until = [DateTime]::UtcNow.AddSeconds(10)
+        while (!(Test-Path -LiteralPath 'exit.flag') -and [DateTime]::UtcNow -lt $until) { Start-Sleep -Milliseconds 25 }
+        """);
+    Check(windowsSessions.Start(stopProbeDirectory, namedProfile).Started, "The Windows stop fixture should start.");
+    try
+    {
+        timeout.Restart();
+        while (windowsSessions.GetStatus(namedProfile) == ServerSessionStatus.Starting
+            && timeout.Elapsed < TimeSpan.FromSeconds(10))
+            await Task.Delay(25);
+        Check(!windowsSessions.RequestStop(alphaProfile).Accepted && windowsSessions.RequestStop(namedProfile).Accepted,
+            "Only the session which owns the Windows relay can receive the stop request.");
+        timeout.Restart();
+        while (!File.Exists(receivedCommand) && timeout.Elapsed < TimeSpan.FromSeconds(10))
+            await Task.Delay(25);
+        Check(File.Exists(receivedCommand) && File.ReadAllText(receivedCommand) == "quit"
+            && windowsSessions.GetStatus(namedProfile) == ServerSessionStatus.Stopping,
+            "The exact quit command must reach the child's stdin without prematurely reporting it stopped.");
+    }
+    finally
+    {
+        File.WriteAllText(releaseStop, "");
+    }
+    timeout.Restart();
+    while (windowsSessions.GetStatus(namedProfile) == ServerSessionStatus.Stopping
+        && timeout.Elapsed < TimeSpan.FromSeconds(10))
+        await Task.Delay(25);
+    Check(windowsSessions.GetStatus(namedProfile) == ServerSessionStatus.Stopped,
+        "The relay must observe the cmd process exiting even when the batch has a trailing PAUSE.");
+    Console.WriteLine("PASS: Windows relay delivers quit and observes cmd exit after PAUSE");
 }
 
 static void Check(bool condition, string message)
@@ -283,6 +358,9 @@ sealed class TestDirectory : IDisposable
 sealed class FakeLaunchProcess : IServerLaunchProcess
 {
     public bool HasExited { get; set; }
+    public bool ExitConfirmed { get; set; } = true;
     public bool ReadinessConfirmed { get; set; }
+    public int StopRequests { get; private set; }
+    public void RequestGracefulStop() => StopRequests++;
     public void Dispose() { }
 }

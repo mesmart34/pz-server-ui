@@ -7,7 +7,9 @@ namespace PzServerUi.Application;
 public interface IServerLaunchProcess : IDisposable
 {
     bool HasExited { get; }
+    bool ExitConfirmed { get; }
     bool ReadinessConfirmed { get; }
+    void RequestGracefulStop();
 }
 
 public enum ServerSessionStatus
@@ -17,9 +19,13 @@ public enum ServerSessionStatus
     Running,
     StartupFailed,
     Ended,
+    Stopping,
+    Stopped,
+    StopUnconfirmed,
 }
 
 public sealed record ServerLaunchResult(bool Started, string Message);
+public sealed record ServerStopResult(bool Accepted, string? Error = null);
 
 public sealed class ServerLaunches(Func<ProcessStartInfo, IServerLaunchProcess> startProcess)
 {
@@ -39,6 +45,27 @@ public sealed class ServerLaunches(Func<ProcessStartInfo, IServerLaunchProcess> 
 
     public ServerLaunches() : this(WindowsSessionLauncher.Start) { }
 
+    public ServerStopResult RequestStop(ServerProfile profile)
+    {
+        lock (_gate)
+        {
+            if (Observe(profile.Name) != ServerSessionStatus.Running)
+                return new(false, "Можно остановить только работающий сеанс, запущенный из панели.");
+
+            var session = _sessions[profile.Name];
+            try
+            {
+                session.Process!.RequestGracefulStop();
+                session.Status = ServerSessionStatus.Stopping;
+                return new(true);
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException)
+            {
+                return new(false, $"Не удалось передать запрос остановки: {error.Message}");
+            }
+        }
+    }
+
     public ServerSessionStatus GetStatus(ServerProfile profile)
     {
         lock (_gate)
@@ -51,7 +78,8 @@ public sealed class ServerLaunches(Func<ProcessStartInfo, IServerLaunchProcess> 
         {
             try
             {
-                if (Observe(profile.Name) is ServerSessionStatus.Starting or ServerSessionStatus.Running)
+                if (Observe(profile.Name) is ServerSessionStatus.Starting or ServerSessionStatus.Running
+                    or ServerSessionStatus.Stopping or ServerSessionStatus.StopUnconfirmed)
                     return Reject("Окно запуска этого профиля ещё открыто. Второй запуск не выполнен.");
 
                 if (string.IsNullOrWhiteSpace(installationFolder))
@@ -105,9 +133,13 @@ public sealed class ServerLaunches(Func<ProcessStartInfo, IServerLaunchProcess> 
             if (process.HasExited)
             {
                 session.Process = null;
-                session.Status = session.Status == ServerSessionStatus.Running
-                    ? ServerSessionStatus.Ended
-                    : ServerSessionStatus.StartupFailed;
+                session.Status = session.Status switch
+                {
+                    ServerSessionStatus.Running => ServerSessionStatus.Ended,
+                    ServerSessionStatus.Stopping when process.ExitConfirmed => ServerSessionStatus.Stopped,
+                    ServerSessionStatus.Stopping => ServerSessionStatus.StopUnconfirmed,
+                    _ => ServerSessionStatus.StartupFailed,
+                };
                 process.Dispose();
             }
             else if (ready)
