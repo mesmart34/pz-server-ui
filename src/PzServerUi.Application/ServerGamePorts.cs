@@ -5,6 +5,9 @@ namespace PzServerUi.Application;
 
 internal readonly record struct ServerGamePorts(int DefaultPort, int UdpPort)
 {
+    internal const int StandardDefaultPort = 16261;
+    internal const int StandardUdpPort = 16262;
+
     public static ServerGamePorts Read(string configurationPath)
     {
         int? defaultPort = null;
@@ -25,7 +28,7 @@ internal readonly record struct ServerGamePorts(int DefaultPort, int UdpPort)
         }
 
         // Defaults from the Dedicated Server's standard ServerOptions.
-        var ports = new ServerGamePorts(defaultPort ?? 16261, directPort ?? 16262);
+        var ports = new ServerGamePorts(defaultPort ?? StandardDefaultPort, directPort ?? StandardUdpPort);
         if (ports.DefaultPort == ports.UdpPort)
             throw new IOException($"DefaultPort и UDPPort используют один и тот же UDP {ports.DefaultPort}. Укажи разные порты.");
         return ports;

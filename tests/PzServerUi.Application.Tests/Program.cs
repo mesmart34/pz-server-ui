@@ -135,6 +135,33 @@ CheckThrows<FileNotFoundException>(() => ServerProfileMods.Read(modProfiles.Sele
     "A deleted INI is an error, not an empty mod list.");
 Console.WriteLine("PASS: reads the selected profile's Mod IDs and Workshop IDs without modifying its INI");
 
+var basicIni = Path.Combine(modProfiles.ConfigurationDirectory, "settings.ini");
+var basicProfile = new ServerProfile("settings", basicIni, null);
+var basicText = "\uFEFF# Настройки\r\nPublicName=Keep this\r\nMaxPlayers=0032 \r\nPVP=true\r\n"
+    + "DefaultPort = 16261 \r\nPassword=do-not-touch\r\nRCONPort=27015\r\nMods=Extra";
+File.WriteAllText(basicIni, basicText);
+var basic = BasicServerSettings.Open(basicProfile);
+Check(basic is { MaxPlayers: "0032", Pvp: true, DefaultPort: "16261", UdpPort: "16262" },
+    "Read the selected profile and use the game default for an omitted port.");
+foreach (var invalid in new[] { (0, 16261, 16262), (101, 16261, 16262), (4, 0, 16262),
+             (4, 65536, 16262), (4, 16261, 16261) })
+    CheckThrows<ArgumentException>(() => basic.Save(invalid.Item1, false, invalid.Item2, invalid.Item3),
+        "Invalid limits or game ports must not reach the INI.");
+Check(File.ReadAllBytes(basicIni).SequenceEqual(System.Text.Encoding.UTF8.GetBytes(basicText)),
+    "Rejecting invalid values does not modify the file.");
+Check(basic.Save(32, false, 16361, 16362), "Apply only changed fields, including an omitted field if edited.");
+var basicExpected = basicText.Replace("PVP=true", "PVP=false").Replace("16261 ", "16361 ") + "\r\nUDPPort=16362";
+Check(File.ReadAllBytes(basicIni).SequenceEqual(System.Text.Encoding.UTF8.GetBytes(basicExpected))
+    && File.ReadAllBytes(moddedIni).SequenceEqual(moddedBytes), "Preserve exact unrelated INI bytes and sibling profiles.");
+Check(!basic.Save(32, false, 16361, 16362), "Saving unchanged values is a no-op.");
+File.AppendAllText(basicIni, "\r\n# changed outside the panel");
+CheckThrows<ProfileConfigurationConflictException>(() => basic.Save(40, true, 16361, 16362),
+    "Reject a stale save even when an unrelated line changed.");
+Check(File.ReadAllText(basicIni).EndsWith("# changed outside the panel", StringComparison.Ordinal),
+    "Leave the external edit untouched.");
+Check(BasicServerSettings.Open(basicProfile).Save(40, true, 16361, 16362), "Save succeeds after an explicit reload.");
+Console.WriteLine("PASS: basic settings edit only requested INI fields, validate ports, and reject stale edits");
+
 var sandboxProfile = profiles.Items.Single(profile => profile.Name == "alpha");
 var sandboxPath = Path.Combine(configDirectory, "alpha_SandboxVars.lua");
 CheckThrows<FileNotFoundException>(() => SandboxSettings.Open(sandboxProfile),
@@ -161,7 +188,7 @@ Check(File.ReadAllBytes(sandboxPath).SequenceEqual(System.Text.Encoding.UTF8.Get
     && File.ReadAllText(worldFile) == "world", "Only the three existing value tokens may change.");
 Check(!sandboxEditor.Save(true, 8, 2), "Saving identical values is a no-op.");
 File.AppendAllText(sandboxPath, "-- external comment\r\n");
-CheckThrows<SandboxSettingsConflictException>(() => sandboxEditor.Save(false, 3, 1),
+CheckThrows<ProfileConfigurationConflictException>(() => sandboxEditor.Save(false, 3, 1),
     "Even an external comment must invalidate a stale edit.");
 Check(File.ReadAllBytes(sandboxPath).SequenceEqual(System.Text.Encoding.UTF8.GetBytes(expectedLua + "-- external comment\r\n")),
     "Do not overwrite the external edit.");
