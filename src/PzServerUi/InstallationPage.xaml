@@ -168,7 +168,7 @@
                     <Label x:Name="ProfileBreadcrumb" FontSize="12" Style="{StaticResource Muted}"
                            LineBreakMode="TailTruncation" />
                     <Border Grid.Row="1" x:Name="ProfileHero" MinimumHeightRequest="218" Stroke="#3B4032"
-                            StrokeShape="RoundRectangle 12" BackgroundColor="#24291F" IsClippedToBounds="True">
+                            StrokeShape="RoundRectangle 12" BackgroundColor="#24291F">
                         <Grid>
                             <Image x:Name="SelectedCover" Aspect="AspectFill" />
                             <Grid InputTransparent="True">
