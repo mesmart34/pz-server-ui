@@ -28,7 +28,7 @@ public sealed class DedicatedServerInstallation(string selectionFile)
         if (!Directory.Exists(folder))
             return new(false, "Папка не существует или недоступна. Выбери папку установки Dedicated Server.");
 
-        if (!Launchers.Any(launcher => File.Exists(Path.Combine(folder, launcher))))
+        if (FindLauncher(folder) is null)
             return new(false, $"В папке нет файла запуска Dedicated Server ({string.Join(", ", Launchers)}). Выбери папку выделенного сервера, а не игры.");
 
         string? temporaryFile = null;
@@ -60,6 +60,9 @@ public sealed class DedicatedServerInstallation(string selectionFile)
             }
         }
     }
+
+    internal static string? FindLauncher(string folder) =>
+        Launchers.FirstOrDefault(launcher => File.Exists(Path.Combine(folder, launcher)));
 }
 
 public sealed record InstallationSelection(bool Accepted, string? Error);
