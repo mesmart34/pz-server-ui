@@ -75,6 +75,8 @@
                             <FlexLayout Wrap="Wrap">
                                 <Button x:Name="ShowProfileButton" Text="Профиль" Clicked="OnShowProfileClicked"
                                         IsEnabled="False" Margin="0,0,8,4" />
+                                <Button x:Name="ShowSettingsButton" Text="Настройки" Clicked="OnShowSettingsClicked"
+                                        Margin="0,0,8,4" />
                                 <Button x:Name="ShowModsButton" Text="Моды" Clicked="OnShowModsClicked"
                                         Margin="0,0,8,4" />
                                 <Button x:Name="ShowConsoleButton" Text="Консоль" Clicked="OnShowConsoleClicked"
@@ -108,6 +110,34 @@
                                     <Button Text="Перечитать файл" Margin="0,0,0,4" Clicked="OnReloadSandboxClicked" />
                                 </FlexLayout>
                                 <Label x:Name="SandboxMessage" IsVisible="False" LineBreakMode="WordWrap" />
+                            </VerticalStackLayout>
+                            <VerticalStackLayout x:Name="SettingsPane" IsVisible="False" Spacing="8">
+                                <Label Text="Основные настройки" FontSize="18" FontAttributes="Bold"
+                                       SemanticProperties.HeadingLevel="Level2" />
+                                <Label Text="Изменения применяются при следующем запуске. Сохранение не перезапускает сервер."
+                                       LineBreakMode="WordWrap" />
+                                <VerticalStackLayout x:Name="BasicFields" IsVisible="False" Spacing="5">
+                                    <Label Text="Лимит игроков (от 1 до 100)" />
+                                    <Entry x:Name="MaxPlayersEntry" Keyboard="Numeric"
+                                           SemanticProperties.Description="Лимит игроков" />
+                                    <HorizontalStackLayout Spacing="4">
+                                        <CheckBox x:Name="PvpBox" SemanticProperties.Description="Разрешить PvP" />
+                                        <Label Text="Разрешить PvP" VerticalOptions="Center" />
+                                    </HorizontalStackLayout>
+                                    <Label Text="Основной UDP-порт (DefaultPort)" />
+                                    <Entry x:Name="DefaultPortEntry" Keyboard="Numeric"
+                                           SemanticProperties.Description="Основной UDP-порт" />
+                                    <Label Text="Дополнительный UDP-порт (UDPPort)" />
+                                    <Entry x:Name="UdpPortEntry" Keyboard="Numeric"
+                                           SemanticProperties.Description="Дополнительный UDP-порт" />
+                                    <Label Text="Укажи два разных порта от 1 до 65535." LineBreakMode="WordWrap" />
+                                </VerticalStackLayout>
+                                <FlexLayout Wrap="Wrap">
+                                    <Button x:Name="SaveBasicButton" Text="Сохранить настройки" IsEnabled="False"
+                                            Margin="0,0,8,4" Clicked="OnSaveBasicClicked" />
+                                    <Button Text="Перечитать INI" Margin="0,0,0,4" Clicked="OnReloadBasicClicked" />
+                                </FlexLayout>
+                                <Label x:Name="BasicMessage" IsVisible="False" LineBreakMode="WordWrap" />
                             </VerticalStackLayout>
                             <VerticalStackLayout x:Name="ModsPane" IsVisible="False" Spacing="8">
                                 <Label Text="Моды выбранного профиля" FontSize="18" FontAttributes="Bold"

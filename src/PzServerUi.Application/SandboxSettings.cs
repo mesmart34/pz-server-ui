@@ -6,26 +6,19 @@ namespace PzServerUi.Application;
 
 public sealed record SandboxDayLength(int Code, int Minutes);
 
-public sealed class SandboxSettingsConflictException(string message) : IOException(message);
-
 public sealed class SandboxSettings
 {
-    private const int MaxBytes = 1024 * 1024;
     private const string StarterKey = "StarterKit";
     private const string PointsKey = "CharacterFreePoints";
     private const string DayKey = "DayLength";
     private const string VersionKey = "VERSION";
-    private static readonly UTF8Encoding Utf8 = new(false, true);
-    private static readonly object SaveLock = new();
-    private readonly string _path;
-    private byte[] _original;
+    private readonly ProfileConfigurationFile _file;
     private LiteralTable _table;
 
-    private SandboxSettings(string path, byte[] bytes)
+    private SandboxSettings(ProfileConfigurationFile file)
     {
-        _path = path;
-        _original = bytes;
-        _table = Parse(bytes);
+        _file = file;
+        _table = Parse(file.Text);
         _ = StarterKit;
         _ = CharacterFreePoints;
         _ = DayLength;
@@ -57,7 +50,7 @@ public sealed class SandboxSettings
     {
         var path = Path.Combine(Path.GetDirectoryName(profile.ConfigurationPath)!,
             Path.GetFileNameWithoutExtension(profile.ConfigurationPath) + "_SandboxVars.lua");
-        return new(path, Read(path));
+        return new(ProfileConfigurationFile.Open(path));
     }
 
     // A snapshot is kept by the form. Never rebase the form's values over edits made outside it.
@@ -68,124 +61,27 @@ public sealed class SandboxSettings
         if (dayLength != DayLength && !DayLengths.Any(option => option.Code == dayLength))
             throw new ArgumentOutOfRangeException(nameof(dayLength));
 
-        lock (SaveLock)
-        {
-            var changes = new Dictionary<string, string>();
-            if (starterKit != StarterKit)
-                changes[StarterKey] = starterKit ? "true" : "false";
-            if (characterFreePoints != CharacterFreePoints)
-                changes[PointsKey] = characterFreePoints.ToString(CultureInfo.InvariantCulture);
-            if (dayLength != DayLength)
-                changes[DayKey] = dayLength.ToString(CultureInfo.InvariantCulture);
-            if (changes.Count == 0)
-            {
-                CheckOriginal(Read(_path));
-                return false;
-            }
-
-            var changed = Utf8.GetBytes(_table.Rewrite(changes));
-            var updated = Parse(changed);
-            var staging = _path + "." + Guid.NewGuid().ToString("N");
-            var backup = staging + ".previous";
-            try
-            {
-                using (var output = new FileStream(staging, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-                {
-                    output.Write(changed);
-                    output.Flush(flushToDisk: true);
-                }
-                // Deny in-place writers through the replacement. A writer using its own rename can
-                // still race; keep the actual displaced bytes in that case instead of losing them.
-                using var current = OpenRead(_path);
-                CheckOriginal(Read(current));
-                CheckOriginal(Read(_path));
-                File.Replace(staging, _path, backup);
-                if (!Read(backup).AsSpan().SequenceEqual(_original))
-                {
-                    RestoreExternalEdit(backup, changed);
-                }
-                TryDelete(backup);
-                _original = changed;
-                _table = updated;
-                return true;
-            }
-            finally
-            {
-                TryDelete(staging);
-            }
-        }
+        var changes = new Dictionary<string, string>();
+        if (starterKit != StarterKit)
+            changes[StarterKey] = starterKit ? "true" : "false";
+        if (characterFreePoints != CharacterFreePoints)
+            changes[PointsKey] = characterFreePoints.ToString(CultureInfo.InvariantCulture);
+        if (dayLength != DayLength)
+            changes[DayKey] = dayLength.ToString(CultureInfo.InvariantCulture);
+        if (changes.Count == 0)
+            return _file.Save(_file.Text);
+        var text = _table.Rewrite(changes);
+        var updated = Parse(text);
+        if (!_file.Save(text))
+            return false;
+        _table = updated;
+        return true;
     }
 
-    private void RestoreExternalEdit(string backup, byte[] changed)
+    private static LiteralTable Parse(string text)
     {
-        var intervening = backup + ".intervening";
-        try
-        {
-            using var replacement = OpenRead(_path);
-            if (!Read(replacement).AsSpan().SequenceEqual(changed)
-                || !Read(_path).AsSpan().SequenceEqual(changed))
-                throw Conflict(backup);
-
-            File.Replace(backup, _path, intervening);
-            if (!Read(intervening).AsSpan().SequenceEqual(changed))
-                throw Conflict(intervening);
-            TryDelete(intervening);
-        }
-        catch (Exception error) when ((error is IOException or UnauthorizedAccessException)
-                                      && error is not SandboxSettingsConflictException)
-        {
-            throw Conflict(File.Exists(backup) ? backup : File.Exists(intervening) ? intervening : null);
-        }
-        throw Conflict(null);
-    }
-
-    private void CheckOriginal(byte[] current)
-    {
-        if (!current.AsSpan().SequenceEqual(_original))
-            throw Conflict(null);
-    }
-
-    private static SandboxSettingsConflictException Conflict(string? preservedCopy) => new(
-        "Файл песочницы изменился вне панели. Перечитай его перед сохранением."
-        + (preservedCopy is null ? "" : $" Копия внешней правки: {preservedCopy}"));
-
-    private static FileStream OpenRead(string path)
-    {
-        if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
-            throw new IOException("Панель не редактирует файл песочницы по ссылке.");
-        return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
-    }
-
-    private static byte[] Read(string path)
-    {
-        using var file = OpenRead(path);
-        return Read(file);
-    }
-
-    private static byte[] Read(FileStream file)
-    {
-        if (file.Length > MaxBytes)
-            throw new IOException("Файл песочницы слишком большой для безопасного редактирования.");
-        var bytes = new byte[(int)file.Length];
-        file.ReadExactly(bytes);
-        if (file.ReadByte() != -1)
-            throw Conflict(null);
-        return bytes;
-    }
-
-    private static void TryDelete(string path)
-    {
-        try { File.Delete(path); }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
-    }
-
-    private static LiteralTable Parse(byte[] bytes)
-    {
-        try { return new LiteralTable(Utf8.GetString(bytes)); }
-        catch (Exception error) when (error is DecoderFallbackException or RegexMatchTimeoutException)
-        {
-            throw BadFile();
-        }
+        try { return new LiteralTable(text); }
+        catch (RegexMatchTimeoutException) { throw BadFile(); }
     }
 
     private static InvalidDataException BadFile() => new(
