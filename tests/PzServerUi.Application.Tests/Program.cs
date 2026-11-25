@@ -3,6 +3,14 @@ using System.Net;
 using System.Net.Sockets;
 using PzServerUi.Application;
 
+if (args is ["zombie.network.GameServer", "-servername", _, "--external-discovery-fixture", var release])
+{
+    var lifetime = Stopwatch.StartNew();
+    while (!File.Exists(release) && lifetime.Elapsed < TimeSpan.FromSeconds(30))
+        await Task.Delay(50);
+    return;
+}
+
 using var sandbox = new TestDirectory();
 Environment.SetEnvironmentVariable("LOCALAPPDATA", sandbox.Path);
 var folder = Directory.CreateDirectory(Path.Combine(sandbox.Path, "Dedicated Server")).FullName;
@@ -217,6 +225,24 @@ finally
 }
 Console.WriteLine("PASS: occupied UDP and in-flight port reservations block launch without changing either profile");
 
+var java = Path.Combine(launchFolder, "jre64", "bin", "java.exe");
+var gameClass = "zombie.network.GameServer";
+var externalCandidate = new DedicatedProcessCandidate(java,
+    [java, "-Xmx2g", "-cp", "server classpath", gameClass, "-servername", "Second world"]);
+var external = ExternalServerDiscovery.Match(launchFolder, [externalCandidate,
+    new(java, [java, "zombie.gameStates.MainScreenState", gameClass, "-servername", "client"]),
+    new(java, [java, gameClass, "-servername", "duplicate-option", "-servername", "second-option"]),
+    new(java, [java, "-Duser.home=elsewhere", gameClass, "-servername", "other-user-data"]),
+    new(java, [java, gameClass, "-servername", "other-cache", "-cachedir=elsewhere"]),
+    new(java, [java, gameClass]),
+    new(Path.Combine(sandbox.Path, "unrelated", "jre64", "bin", "java.exe"), externalCandidate.Arguments)]);
+Check(external.Count == 1 && external.GetValueOrDefault("second world") == ExternalServerStatus.ProcessObserved,
+    "External discovery must match only explicit, unambiguous Dedicated Server profiles from the selected installation.");
+Check(ExternalServerDiscovery.Match(launchFolder, [externalCandidate, externalCandidate])
+    .GetValueOrDefault("Second world") == ExternalServerStatus.Ambiguous,
+    "Two matching processes may not be exposed as a unique session or as a target for stop.");
+Console.WriteLine("PASS: external Dedicated Server discovery does not guess profiles or claim readiness");
+
 if (OperatingSystem.IsWindows())
 {
     var probeDirectory = Directory.CreateDirectory(Path.Combine(sandbox.Path, "Argument probe & spaces")).FullName;
@@ -237,6 +263,38 @@ if (OperatingSystem.IsWindows())
         .SequenceEqual(new[] { "-servername", "Second world" }),
         "Windows cmd must deliver the full name as one argument, without interpreting the installation path.");
     Console.WriteLine("PASS: Windows batch argument probe preserves a profile name with spaces");
+
+    var fakeInstall = Directory.CreateDirectory(Path.Combine(sandbox.Path, "External process & spaces")).FullName;
+    var javaDirectory = Directory.CreateDirectory(Path.Combine(fakeInstall, "jre64", "bin")).FullName;
+    foreach (var dependency in Directory.EnumerateFiles(AppContext.BaseDirectory))
+        File.Copy(dependency, Path.Combine(javaDirectory, Path.GetFileName(dependency)));
+    var fakeJava = Path.Combine(javaDirectory, "java.exe");
+    File.Copy(Path.Combine(javaDirectory, "PzServerUi.Application.Tests.exe"), fakeJava);
+    var fixtureRelease = Path.Combine(fakeInstall, "exit.flag");
+    var candidate = new ProcessStartInfo(fakeJava) { CreateNoWindow = true, UseShellExecute = false };
+    foreach (var argument in new[] { gameClass, "-servername", "Second world", "--external-discovery-fixture", fixtureRelease })
+        candidate.ArgumentList.Add(argument);
+    using var fixture = Process.Start(candidate) ?? throw new InvalidOperationException("The external process fixture did not start.");
+    try
+    {
+        var scanned = await WindowsExternalServers.ScanAsync(fakeInstall);
+        if (scanned.Available)
+        {
+            Check(scanned.GetStatus("Second world") == ExternalServerStatus.ProcessObserved
+                && scanned.GetStatus("alpha") == ExternalServerStatus.NotObserved,
+                $"Windows must discover only the exact external fixture with a quoted profile; fixture exited: {fixture.HasExited}.");
+            Console.WriteLine("PASS: Windows scanner finds a real external fixture without launching or stopping it");
+        }
+        else
+        {
+            Console.WriteLine("SKIP: Windows process inventory is unavailable in this environment");
+        }
+    }
+    finally
+    {
+        File.WriteAllText(fixtureRelease, "");
+        await fixture.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+    }
 }
 
 var sessionProcesses = new List<FakeLaunchProcess>();
