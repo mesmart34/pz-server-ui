@@ -81,6 +81,29 @@
                                 <Label x:Name="ProfileConfigurationLabel" LineBreakMode="CharacterWrap" />
                                 <Label Text="Папка мира" FontAttributes="Bold" />
                                 <Label x:Name="ProfileWorldLabel" LineBreakMode="CharacterWrap" />
+                                <BoxView Margin="0,8" HeightRequest="1"
+                                         Color="{AppThemeBinding Light=#C8D1C9, Dark=#49564B}" />
+                                <Label Text="Песочница" FontSize="18" FontAttributes="Bold"
+                                       SemanticProperties.HeadingLevel="Level2" />
+                                <VerticalStackLayout x:Name="SandboxFields" IsVisible="False" Spacing="6">
+                                    <HorizontalStackLayout Spacing="4">
+                                        <CheckBox x:Name="StarterKitBox" SemanticProperties.Description="Стартовый набор" />
+                                        <Label Text="Стартовый набор" VerticalOptions="Center" />
+                                    </HorizontalStackLayout>
+                                    <Label Text="Дополнительные очки черт (от −100 до 100)" />
+                                    <Entry x:Name="TraitPointsEntry" Keyboard="Numeric" MaxLength="11"
+                                           SemanticProperties.Description="Дополнительные очки черт" />
+                                    <Picker x:Name="DayLengthPicker" Title="Длительность игрового дня"
+                                            SemanticProperties.Description="Длительность игрового дня в реальном времени" />
+                                    <Label Text="Набор и очки проверяются на новом персонаже."
+                                           LineBreakMode="WordWrap" />
+                                </VerticalStackLayout>
+                                <FlexLayout Wrap="Wrap">
+                                    <Button x:Name="SaveSandboxButton" Text="Сохранить песочницу" IsEnabled="False"
+                                            Margin="0,0,8,4" Clicked="OnSaveSandboxClicked" />
+                                    <Button Text="Перечитать файл" Margin="0,0,0,4" Clicked="OnReloadSandboxClicked" />
+                                </FlexLayout>
+                                <Label x:Name="SandboxMessage" IsVisible="False" LineBreakMode="WordWrap" />
                             </VerticalStackLayout>
                             <VerticalStackLayout x:Name="ConsolePane" IsVisible="False" Spacing="6">
                                 <Editor x:Name="ConsoleOutput" IsReadOnly="True" HeightRequest="280"

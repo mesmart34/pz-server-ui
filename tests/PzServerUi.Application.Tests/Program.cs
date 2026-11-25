@@ -105,6 +105,67 @@ profiles.Refresh();
 Check(profiles.Selected?.Name == "alpha", "Refreshing after the selected profile is removed must not keep stale details.");
 Console.WriteLine("PASS: discovers named profiles without modifying data and keeps details in sync with selection");
 
+var sandboxProfile = profiles.Items.Single(profile => profile.Name == "alpha");
+var sandboxPath = Path.Combine(configDirectory, "alpha_SandboxVars.lua");
+CheckThrows<FileNotFoundException>(() => SandboxSettings.Open(sandboxProfile),
+    "Opening sandbox settings cannot create a missing game file.");
+var lua = "\uFEFFSandboxVars = {\r\n"
+    + "  VERSION = 6,\r\n"
+    + "  -- StarterKit = true (example only)\r\n"
+    + "  StarterKit = false, -- keep comment\r\n"
+    + "  CharacterFreePoints = 0,\r\n"
+    + "  DayLength = 4,\r\n"
+    + "  Mod = { StarterKit = false, Text = [=[}, -- DayLength = 5]=] },\r\n"
+    + "}\r\n";
+File.WriteAllText(sandboxPath, lua);
+var sandboxEditor = SandboxSettings.Open(sandboxProfile);
+Check(sandboxEditor is { StarterKit: false, CharacterFreePoints: 0, DayLength: 4 }
+    && sandboxEditor.DayLengths.Single(option => option.Code == 4).Minutes == 90,
+    "Read the selected profile's fields and interpret Build 42 day length.");
+Check(sandboxEditor.Save(true, 8, 2), "Save should report an actual change.");
+var expectedLua = lua.Replace("StarterKit = false, --", "StarterKit = true, --")
+    .Replace("CharacterFreePoints = 0,", "CharacterFreePoints = 8,")
+    .Replace("DayLength = 4,", "DayLength = 2,");
+Check(File.ReadAllBytes(sandboxPath).SequenceEqual(System.Text.Encoding.UTF8.GetBytes(expectedLua))
+    && File.ReadAllText(alphaConfig) == "PublicName=Alpha\n"
+    && File.ReadAllText(worldFile) == "world", "Only the three existing value tokens may change.");
+Check(!sandboxEditor.Save(true, 8, 2), "Saving identical values is a no-op.");
+File.AppendAllText(sandboxPath, "-- external comment\r\n");
+CheckThrows<SandboxSettingsConflictException>(() => sandboxEditor.Save(false, 3, 1),
+    "Even an external comment must invalidate a stale edit.");
+Check(File.ReadAllBytes(sandboxPath).SequenceEqual(System.Text.Encoding.UTF8.GetBytes(expectedLua + "-- external comment\r\n")),
+    "Do not overwrite the external edit.");
+Console.WriteLine("PASS: sandbox edits preserve surrounding bytes and refuse stale saves");
+
+var legacyLua = lua.Replace("VERSION = 6", "VERSION = 4");
+File.WriteAllText(sandboxPath, legacyLua);
+var legacyEditor = SandboxSettings.Open(sandboxProfile);
+Check(legacyEditor.DayLengths.Single(option => option.Code == 4).Minutes == 120
+    && legacyEditor.DayLengths[^1] is { Code: 26, Minutes: 1440 },
+    "Do not use the Build 42 day length mapping for a legacy profile.");
+CheckThrows<ArgumentOutOfRangeException>(() => legacyEditor.Save(true, 101, 2), "Reject out-of-range points.");
+CheckThrows<ArgumentOutOfRangeException>(() => legacyEditor.Save(true, 1, 27), "Reject a day code for a different format.");
+if (OperatingSystem.IsWindows())
+{
+    using (File.Open(sandboxPath, FileMode.Open, FileAccess.Read, FileShare.Read))
+        CheckThrows<IOException>(() => legacyEditor.Save(true, 1, 2), "Do not overwrite a locked sandbox file.");
+    Check(Directory.EnumerateFiles(configDirectory, "alpha_SandboxVars.lua*").Single() == sandboxPath,
+        "A blocked save should clean its staging file.");
+}
+Check(File.ReadAllText(sandboxPath) == legacyLua.TrimStart('\uFEFF'), "Rejected edits must not modify any byte.");
+foreach (var invalidLua in new[]
+{
+    lua.Replace("StarterKit = false,", "StarterKit = false, StarterKit = false,"),
+    lua.Replace("DayLength = 4,", "[\"DayLength\"] = 4,"),
+    lua + "SandboxVars.StarterKit = true",
+})
+{
+    File.WriteAllText(sandboxPath, invalidLua);
+    CheckThrows<InvalidDataException>(() => SandboxSettings.Open(sandboxProfile),
+        "Do not edit ambiguous or executable Lua.");
+}
+Console.WriteLine("PASS: sandbox edits respect legacy duration codes and fail closed on unsafe files");
+
 var launchFolder = Directory.CreateDirectory(Path.Combine(sandbox.Path, "Server Install & Tools")).FullName;
 var launcherPath = Path.Combine(launchFolder, "StartServer64.bat");
 const string forwardingScript = "@echo off\r\n\".\\jre64\\bin\\java.exe\" -Xmx2g zombie.network.GameServer -statistic 0 %1 %2\r\n";
@@ -556,6 +617,13 @@ static int[] NewUdpPorts()
         foreach (var socket in sockets)
             socket.Dispose();
     }
+}
+
+static void CheckThrows<T>(Action action, string message) where T : Exception
+{
+    try { action(); }
+    catch (T) { return; }
+    throw new InvalidOperationException(message);
 }
 
 static void Check(bool condition, string message)

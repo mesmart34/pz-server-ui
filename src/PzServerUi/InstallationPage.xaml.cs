@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using Microsoft.Maui.Controls;
 using Microsoft.UI.Windowing;
 using PzServerUi.Application;
@@ -27,6 +28,8 @@ public partial class InstallationPage : ContentPage
     private bool _sendingConsole;
     private bool _closeInProgress;
     private bool _canClose;
+    private string? _sandboxProfilePath;
+    private SandboxSettings? _sandboxSettings;
     private Microsoft.UI.Xaml.Window? _nativeWindow;
 
     public InstallationPage()
@@ -148,6 +151,8 @@ public partial class InstallationPage : ContentPage
             ConsoleOutput.Text = "";
             ConsoleMessage.IsVisible = false;
         }
+        if (!string.Equals(_sandboxProfilePath, profile?.ConfigurationPath, StringComparison.OrdinalIgnoreCase))
+            LoadSandbox(profile);
         if (profile is null)
             return;
 
@@ -155,6 +160,91 @@ public partial class InstallationPage : ContentPage
         ProfileConfigurationLabel.Text = profile.ConfigurationPath;
         ProfileWorldLabel.Text = profile.WorldPath ?? "Папка мира ещё не найдена.";
         RefreshSessionStatus(profile);
+    }
+
+    private void OnReloadSandboxClicked(object? sender, EventArgs e) => LoadSandbox(_profiles.Selected);
+
+    private void LoadSandbox(ServerProfile? profile)
+    {
+        _sandboxProfilePath = profile?.ConfigurationPath;
+        _sandboxSettings = null;
+        SandboxFields.IsVisible = SaveSandboxButton.IsEnabled = false;
+        SandboxMessage.IsVisible = false;
+        if (profile is null)
+            return;
+
+        try
+        {
+            var settings = SandboxSettings.Open(profile);
+            var choices = settings.DayLengths.Select(option => new DayLengthChoice(option.Code,
+                option.Minutes switch
+                {
+                    1440 => "24 ч (реальное время)",
+                    90 => "1 ч 30 мин",
+                    < 60 => $"{option.Minutes} мин",
+                    _ => $"{option.Minutes / 60} ч",
+                })).ToList();
+            if (!choices.Any(choice => choice.Code == settings.DayLength))
+                choices.Insert(0, new(settings.DayLength, $"Оставить текущее значение (код {settings.DayLength})"));
+            StarterKitBox.IsChecked = settings.StarterKit;
+            TraitPointsEntry.Text = settings.CharacterFreePoints.ToString(CultureInfo.InvariantCulture);
+            DayLengthPicker.ItemsSource = choices;
+            DayLengthPicker.SelectedItem = choices.First(choice => choice.Code == settings.DayLength);
+            _sandboxSettings = settings;
+            SandboxFields.IsVisible = SaveSandboxButton.IsEnabled = true;
+        }
+        catch (FileNotFoundException)
+        {
+            ShowSandboxMessage("Файл песочницы для этого профиля не найден. Панель не создаёт его.");
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            ShowSandboxMessage($"Не удалось открыть файл песочницы. {error.Message}");
+        }
+    }
+
+    private void OnSaveSandboxClicked(object? sender, EventArgs e)
+    {
+        if (_sandboxSettings is not { } settings || DayLengthPicker.SelectedItem is not DayLengthChoice dayLength
+            || !string.Equals(_sandboxProfilePath, _profiles.Selected?.ConfigurationPath, StringComparison.OrdinalIgnoreCase))
+            return;
+        if (!int.TryParse(TraitPointsEntry.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var points)
+            || (points != settings.CharacterFreePoints && points is < -100 or > 100))
+        {
+            ShowSandboxMessage("Введи целое число очков от −100 до 100.");
+            return;
+        }
+        try
+        {
+            if (settings.Save(StarterKitBox.IsChecked, points, dayLength.Code))
+            {
+                LoadSandbox(_profiles.Selected);
+                ShowSandboxMessage("Настройки сохранены и вступят в силу при следующем запуске. "
+                    + "Если сервер уже работает, останови и запусти его вручную.");
+            }
+            else
+                ShowSandboxMessage("Нет изменений для сохранения.");
+        }
+        catch (SandboxSettingsConflictException error)
+        {
+            SaveSandboxButton.IsEnabled = false;
+            ShowSandboxMessage(error.Message);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            ShowSandboxMessage($"Не удалось сохранить настройки. {error.Message}");
+        }
+    }
+
+    private void ShowSandboxMessage(string message)
+    {
+        SandboxMessage.Text = message;
+        SandboxMessage.IsVisible = true;
+    }
+
+    private sealed record DayLengthChoice(int Code, string Label)
+    {
+        public override string ToString() => Label;
     }
 
     private void RefreshSessionStatus(ServerProfile profile)
