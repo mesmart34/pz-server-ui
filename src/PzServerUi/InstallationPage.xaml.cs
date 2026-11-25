@@ -153,6 +153,8 @@ public partial class InstallationPage : ContentPage
         }
         if (!string.Equals(_sandboxProfilePath, profile?.ConfigurationPath, StringComparison.OrdinalIgnoreCase))
             LoadSandbox(profile);
+        if (ModsPane.IsVisible)
+            RefreshProfileMods(profile);
         if (profile is null)
             return;
 
@@ -294,16 +296,47 @@ public partial class InstallationPage : ContentPage
         }
     }
 
-    private void OnShowProfileClicked(object? sender, EventArgs e) => SetConsoleVisible(false);
-    private void OnShowConsoleClicked(object? sender, EventArgs e) => SetConsoleVisible(true);
+    private void OnShowProfileClicked(object? sender, EventArgs e) => ShowPane(ProfilePane);
+    private void OnShowModsClicked(object? sender, EventArgs e) => ShowPane(ModsPane);
+    private void OnShowConsoleClicked(object? sender, EventArgs e) => ShowPane(ConsolePane);
 
-    private void SetConsoleVisible(bool visible)
+    private void ShowPane(View pane)
     {
-        ConsolePane.IsVisible = ShowProfileButton.IsEnabled = visible;
-        ProfilePane.IsVisible = ShowConsoleButton.IsEnabled = !visible;
+        ProfilePane.IsVisible = pane == ProfilePane;
+        ModsPane.IsVisible = pane == ModsPane;
+        ConsolePane.IsVisible = pane == ConsolePane;
+        ShowProfileButton.IsEnabled = !ProfilePane.IsVisible;
+        ShowModsButton.IsEnabled = !ModsPane.IsVisible;
+        ShowConsoleButton.IsEnabled = !ConsolePane.IsVisible;
+        if (ModsPane.IsVisible)
+            RefreshProfileMods(_profiles.Selected);
         if (_profiles.Selected is { } profile)
             RefreshSessionStatus(profile);
     }
+
+    private void RefreshProfileMods(ServerProfile? profile)
+    {
+        ModLists.IsVisible = ModsReadError.IsVisible = false;
+        if (profile is null)
+            return;
+        try
+        {
+            var mods = ServerProfileMods.Read(profile);
+            ModIdsLabel.Text = FormatModIds(mods.ModIds);
+            WorkshopIdsLabel.Text = FormatModIds(mods.WorkshopIds);
+            ModLists.IsVisible = true;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            ModsReadError.Text = error is InvalidDataException
+                ? $"Не удалось прочитать список модов. {error.Message}"
+                : "Не удалось прочитать INI этого профиля. Проверь файл и нажми «Обновить».";
+            ModsReadError.IsVisible = true;
+        }
+    }
+
+    private static string FormatModIds(IReadOnlyList<string> ids) =>
+        ids.Count == 0 ? "Не указаны." : string.Join('\n', ids);
 
     private void OnMaskConsoleChanged(object? sender, CheckedChangedEventArgs e)
     {
