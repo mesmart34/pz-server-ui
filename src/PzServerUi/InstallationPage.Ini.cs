@@ -14,7 +14,8 @@ public partial class InstallationPage
     private readonly Dictionary<string, IniDraft> _iniDrafts = new(StringComparer.OrdinalIgnoreCase);
     private string? _iniProfilePath;
     private IniDraft? _iniDraft;
-    private ServerIniGroup[] _iniGroups = [];
+    private ServerIniGroup? _expandedIniGroup;
+    private int _iniColumnCount = 1;
     private bool _loadingIni;
 
     private async void OnReloadIniClicked(object? sender, EventArgs e)
@@ -35,8 +36,9 @@ public partial class InstallationPage
             _iniDrafts[previous] = draft;
         _iniProfilePath = profile?.ConfigurationPath;
         _iniDraft = null;
+        _expandedIniGroup = null;
         IniFields.Children.Clear();
-        IniFilters.IsVisible = SaveIniButton.IsEnabled = IniMessage.IsVisible = false;
+        IniSearch.IsVisible = SaveIniButton.IsEnabled = IniMessage.IsVisible = false;
         if (profile is null)
             return;
         try
@@ -46,11 +48,8 @@ public partial class InstallationPage
             else
                 _iniDraft = new(ServerIniSettings.Open(profile));
             _loadingIni = true;
-            _iniGroups = _iniDraft.Settings.Fields.Select(field => field.Group).Distinct().ToArray();
-            IniGroupPicker.ItemsSource = new[] { "Все группы" }.Concat(_iniGroups.Select(IniGroupName)).ToArray();
-            IniGroupPicker.SelectedIndex = 0;
             IniSearch.Text = "";
-            IniFilters.IsVisible = true;
+            IniSearch.IsVisible = true;
             SaveIniButton.IsEnabled = _iniDraft is { Conflict: null, Changes.Count: > 0 };
             if (_iniDraft.Conflict is { } conflict)
                 ShowIniMessage(conflict);
@@ -63,36 +62,94 @@ public partial class InstallationPage
         RenderIniFields();
     }
 
-    private void OnIniFilterChanged(object? sender, EventArgs e) => RenderIniFields();
+    private void OnIniSearchChanged(object? sender, TextChangedEventArgs e) => RenderIniFields(openSingleMatch: true);
 
-    private void RenderIniFields()
+    private void OnIniFieldsSizeChanged(object? sender, EventArgs e)
+    {
+        if (sender is not VisualElement { Width: > 0 } panel)
+            return;
+        var columns = panel.Width >= 730 ? 3 : panel.Width >= 480 ? 2 : 1;
+        if (columns == _iniColumnCount)
+            return;
+        _iniColumnCount = columns;
+        RenderIniFields();
+    }
+
+    private void RenderIniFields(bool openSingleMatch = false)
     {
         if (_loadingIni || _iniDraft is not { } draft)
             return;
         IniFields.Children.Clear();
-        var index = IniGroupPicker.SelectedIndex - 1;
         var search = IniSearch.Text;
-        var matches = draft.Settings.Fields.Where(field =>
-            (index < 0 || index >= _iniGroups.Length || _iniGroups[index] == field.Group) &&
+        var groups = draft.Settings.Fields.Where(field =>
             (OverviewQueries.Matches(field.Key, search) || OverviewQueries.Matches(field.Label, search)
-                || OverviewQueries.Matches(IniGroupName(field.Group), search)));
-        foreach (var group in matches.GroupBy(field => field.Group))
+                || OverviewQueries.Matches(IniGroupName(field.Group), search)))
+            .GroupBy(field => field.Group).ToArray();
+        if (_expandedIniGroup is { } expanded && !groups.Any(group => group.Key == expanded))
+            _expandedIniGroup = null;
+        if (openSingleMatch && !string.IsNullOrWhiteSpace(search) && groups.Length == 1)
+            _expandedIniGroup = groups[0].Key;
+        if (groups.Length == 0)
         {
-            var rows = new VerticalStackLayout { Spacing = 6 };
-            var title = new Label { Text = IniGroupName(group.Key), FontAttributes = FontAttributes.Bold, FontSize = 16 };
-            SemanticProperties.SetHeadingLevel(title, SemanticHeadingLevel.Level3);
-            rows.Children.Add(title);
-            foreach (var field in group)
-                rows.Children.Add(BuildIniField(draft, field));
-            IniFields.Children.Add(new Border
-            {
-                Stroke = new SolidColorBrush(Color.FromArgb("#34392E")),
-                Padding = 10,
-                Content = rows
-            });
-        }
-        if (IniFields.Children.Count == 0)
             IniFields.Children.Add(new Label { Text = "Параметры не найдены." });
+            return;
+        }
+
+        var visibleColumns = Math.Min(_iniColumnCount, groups.Length);
+        var headers = new Dictionary<ServerIniGroup, (Button Button, IGrouping<ServerIniGroup, ServerIniField> Group, ContentView Panel)>();
+        ContentView? activePanel = null;
+        foreach (var groupRow in groups.Chunk(visibleColumns))
+        {
+            var row = new Grid { ColumnSpacing = 6 };
+            var panel = new ContentView { IsVisible = false };
+            for (var column = 0; column < visibleColumns; column++)
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Star });
+            for (var column = 0; column < groupRow.Length; column++)
+            {
+                var group = groupRow[column];
+                var header = new Button { Style = (Style)Resources["IniGroupHeader"] };
+                headers.Add(group.Key, (header, group, panel));
+                Grid.SetColumn(header, column);
+                row.Children.Add(header);
+                header.Clicked += (_, _) =>
+                {
+                    _expandedIniGroup = _expandedIniGroup == group.Key ? null : group.Key;
+                    UpdatePanels();
+                };
+            }
+            IniFields.Children.Add(row);
+            IniFields.Children.Add(panel);
+        }
+        UpdatePanels();
+
+        void UpdatePanels()
+        {
+            if (activePanel is not null)
+            {
+                activePanel.IsVisible = false;
+                activePanel.Content = null;
+                activePanel = null;
+            }
+            foreach (var (key, (button, group, panel)) in headers)
+            {
+                var open = _expandedIniGroup == key;
+                var name = IniGroupName(key);
+                button.Text = $"{(open ? "▾" : "▸")}  {name} ({group.Count()})";
+                button.BorderColor = Color.FromArgb(open ? "#786643" : "#34392E");
+                button.BackgroundColor = Color.FromArgb(open ? "#302B21" : "#23271F");
+                button.TextColor = Color.FromArgb(open ? "#D7B773" : "#EFEEE5");
+                SemanticProperties.SetDescription(button, $"{name}, параметров: {group.Count()}, {(open ? "развёрнуто" : "свёрнуто")}");
+                if (!open)
+                    continue;
+
+                var rows = new VerticalStackLayout { Spacing = 6 };
+                foreach (var field in group)
+                    rows.Children.Add(BuildIniField(draft, field));
+                panel.Content = new Border { Style = (Style)Resources["Card"], Padding = 10, Content = rows };
+                panel.IsVisible = true;
+                activePanel = panel;
+            }
+        }
     }
 
     private View BuildIniField(IniDraft draft, ServerIniField field)

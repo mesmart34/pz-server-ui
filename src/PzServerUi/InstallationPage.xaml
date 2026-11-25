@@ -51,6 +51,11 @@
             <Setter Property="BackgroundColor" Value="Transparent" />
             <Setter Property="TextColor" Value="#D7B773" />
         </Style>
+        <Style x:Key="IniGroupHeader" TargetType="Button" BasedOn="{StaticResource Action}">
+            <Setter Property="MinimumHeightRequest" Value="38" />
+            <Setter Property="BorderWidth" Value="1" />
+            <Setter Property="LineBreakMode" Value="TailTruncation" />
+        </Style>
         <Style x:Key="Tab" TargetType="Button">
             <Setter Property="BackgroundColor" Value="Transparent" />
             <Setter Property="BorderWidth" Value="0" />
@@ -349,6 +354,24 @@
                                 <Label x:Name="ProfileWorldLabel" LineBreakMode="CharacterWrap" />
                                 <BoxView Margin="0,8" HeightRequest="1"
                                          Color="{AppThemeBinding Light=#C8D1C9, Dark=#49564B}" />
+                                <HorizontalStackLayout Spacing="8">
+                                    <Image Source="design_sliders.png" Style="{StaticResource InlineIcon}" />
+                                    <Label Text="Настройки сервера (INI)" Style="{StaticResource SectionTitle}"
+                                           SemanticProperties.HeadingLevel="Level2" />
+                                </HorizontalStackLayout>
+                                <Label Text="Изменения применяются при следующем запуске. Сохранение не перезапускает сервер."
+                                       LineBreakMode="WordWrap" />
+                                <Entry x:Name="IniSearch" IsVisible="False" Placeholder="Поиск по названию, ключу или группе"
+                                       TextChanged="OnIniSearchChanged" SemanticProperties.Description="Поиск по параметрам INI" />
+                                <FlexLayout Wrap="Wrap">
+                                    <Button x:Name="SaveIniButton" Text="Сохранить настройки" IsEnabled="False"
+                                            Margin="0,0,8,4" Clicked="OnSaveIniClicked" />
+                                    <Button Text="Перечитать INI" Margin="0,0,0,4" Clicked="OnReloadIniClicked" />
+                                </FlexLayout>
+                                <Label x:Name="IniMessage" IsVisible="False" LineBreakMode="WordWrap" />
+                                <VerticalStackLayout x:Name="IniFields" Spacing="6" SizeChanged="OnIniFieldsSizeChanged" />
+                                <BoxView Margin="0,8" HeightRequest="1"
+                                         Color="{AppThemeBinding Light=#CFD4C3, Dark=#34392E}" />
                                 <Label Text="Песочница" FontSize="18" FontAttributes="Bold"
                                        SemanticProperties.HeadingLevel="Level2" />
                                 <VerticalStackLayout x:Name="SandboxFields" IsVisible="False" Spacing="6">
@@ -370,28 +393,6 @@
                                     <Button Text="Перечитать файл" Margin="0,0,0,4" Clicked="OnReloadSandboxClicked" />
                                 </FlexLayout>
                                 <Label x:Name="SandboxMessage" IsVisible="False" LineBreakMode="WordWrap" />
-                                <BoxView Margin="0,8" HeightRequest="1"
-                                         Color="{AppThemeBinding Light=#CFD4C3, Dark=#34392E}" />
-                                <HorizontalStackLayout Spacing="8">
-                                    <Image Source="design_sliders.png" Style="{StaticResource InlineIcon}" />
-                                    <Label Text="Настройки сервера (INI)" Style="{StaticResource SectionTitle}"
-                                           SemanticProperties.HeadingLevel="Level2" />
-                                </HorizontalStackLayout>
-                                <Label Text="Изменения применяются при следующем запуске. Сохранение не перезапускает сервер."
-                                       LineBreakMode="WordWrap" />
-                                <VerticalStackLayout x:Name="IniFilters" IsVisible="False" Spacing="5">
-                                    <Picker x:Name="IniGroupPicker" Title="Группа параметров" SelectedIndexChanged="OnIniFilterChanged"
-                                            SemanticProperties.Description="Группа параметров INI" />
-                                    <Entry x:Name="IniSearch" Placeholder="Поиск по названию, ключу или группе" TextChanged="OnIniFilterChanged"
-                                           SemanticProperties.Description="Поиск по параметрам INI" />
-                                </VerticalStackLayout>
-                                <FlexLayout Wrap="Wrap">
-                                    <Button x:Name="SaveIniButton" Text="Сохранить настройки" IsEnabled="False"
-                                            Margin="0,0,8,4" Clicked="OnSaveIniClicked" />
-                                    <Button Text="Перечитать INI" Margin="0,0,0,4" Clicked="OnReloadIniClicked" />
-                                </FlexLayout>
-                                <Label x:Name="IniMessage" IsVisible="False" LineBreakMode="WordWrap" />
-                                <VerticalStackLayout x:Name="IniFields" Spacing="8" />
                             </VerticalStackLayout>
                             <VerticalStackLayout x:Name="ModsPane" IsVisible="False" Spacing="8">
                                 <HorizontalStackLayout Spacing="8">
