@@ -35,6 +35,26 @@ dotnet run --project src/PzServerUi
 dotnet run --project tests/PzServerUi.Application.Tests
 ```
 
+## Windows-релизы и номера версий
+
+- **Проверочные сборки.** GitHub Actions запускает тесты и собирает Windows x64 ZIP на PR в `main` и при обновлении `main`. ZIP лежит в артефакте `windows-release` соответствующего запуска. Такие сборки помечены `v0.0.0-ci.<номер запуска>.<попытка>`, обычная локальная сборка показывает `v0.0.0-dev`.
+- **Стабильный релиз.** После проверки `main` создай и отправь тег `vX.Y.Z` на нужном коммите `main`. Workflow соберёт этот коммит и прикрепит `PzServerUi-vX.Y.Z-win-x64.zip` к GitHub Release. Повторно использовать существующий релизный тег не нужно: для новой версии создай новый тег.
+- **Запуск.** Распакуй весь ZIP в одну папку и запусти `PzServerUi.exe`. Архив содержит библиотеки .NET и Windows App SDK. Версия видна в заголовке окна, а `version.json` в архиве содержит версию и точный коммит. Автоматического обновления в приложении нет.
+
+Пример выпуска после слияния нужных изменений:
+
+```powershell
+git fetch origin main
+git tag -a v0.1.0 origin/main -m "PZ Server UI v0.1.0"
+git push origin v0.1.0
+```
+
+Локальная проверка той же упаковки без Git-тега и публикации:
+
+```powershell
+.\scripts\New-WindowsRelease.ps1 -BuildVersion 0.0.0-ci.1.1 -OutputDirectory "$env:TEMP\PzServerUi-build"
+```
+
 - [Спецификация первой версии](https://github.com/mesmart34/pz-server-ui/issues/20)
 - [Доска проекта](https://github.com/users/mesmart34/projects/6)
 - [Задачи и зависимости](https://github.com/mesmart34/pz-server-ui/issues)

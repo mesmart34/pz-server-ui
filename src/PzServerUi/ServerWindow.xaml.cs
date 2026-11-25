@@ -1,3 +1,4 @@
+using System.Reflection;
 using Microsoft.UI.Windowing;
 using Color = Windows.UI.Color;
 
@@ -5,12 +6,22 @@ namespace PzServerUi;
 
 public partial class ServerWindow : Window
 {
-    public ServerWindow() => InitializeComponent();
+    private static readonly string VersionLabel = typeof(ServerWindow).Assembly
+        .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion is { Length: > 0 } version
+        ? $"v{version}"
+        : "версия неизвестна";
+
+    public ServerWindow()
+    {
+        InitializeComponent();
+        Title = $"PZ Server UI {VersionLabel}";
+        SetCompactTitleBar(false);
+    }
 
     internal void SetCompactTitleBar(bool compact)
     {
         LocalModeIndicator.IsVisible = !compact;
-        ServerTitleBar.Subtitle = compact ? "" : "PROJECT ZOMBOID";
+        ServerTitleBar.Subtitle = compact ? VersionLabel : $"PROJECT ZOMBOID · {VersionLabel}";
     }
 
     protected override void OnHandlerChanged()
