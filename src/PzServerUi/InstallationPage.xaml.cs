@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using Microsoft.Maui.Controls;
+using Microsoft.UI.Windowing;
 using PzServerUi.Application;
 using WinRT.Interop;
 using FolderPicker = global::Windows.Storage.Pickers.FolderPicker;
@@ -18,6 +20,11 @@ public partial class InstallationPage : ContentPage
     private readonly Dictionary<string, string> _launchMessages = new(StringComparer.OrdinalIgnoreCase);
     private string? _savedInstallationFolder;
     private bool _updatingProfiles;
+    private string? _consoleProfile;
+    private bool _sendingConsole;
+    private bool _closeInProgress;
+    private bool _canClose;
+    private Microsoft.UI.Xaml.Window? _nativeWindow;
 
     public InstallationPage()
     {
@@ -40,8 +47,22 @@ public partial class InstallationPage : ContentPage
             if (ProfileDetails.IsVisible && _profiles.Selected is { } profile)
                 RefreshSessionStatus(profile);
         };
-        Loaded += (_, _) => statusTimer.Start();
-        Unloaded += (_, _) => statusTimer.Stop();
+        Loaded += (_, _) =>
+        {
+            statusTimer.Start();
+            if (_nativeWindow is null && Window?.Handler?.PlatformView is Microsoft.UI.Xaml.Window native)
+            {
+                _nativeWindow = native;
+                native.AppWindow.Closing += OnWindowClosing;
+            }
+        };
+        Unloaded += (_, _) =>
+        {
+            statusTimer.Stop();
+            if (_nativeWindow is not null)
+                _nativeWindow.AppWindow.Closing -= OnWindowClosing;
+            _nativeWindow = null;
+        };
     }
 
     private void OnRefreshProfilesClicked(object? sender, EventArgs e) => RefreshProfiles();
@@ -86,6 +107,14 @@ public partial class InstallationPage : ContentPage
         ProfileDetails.IsVisible = profile is not null;
         ProfileDetailsPlaceholder.IsVisible = profile is null;
         ProfileDetailsPlaceholder.Text = "Нет выбранного профиля.";
+        if (!string.Equals(_consoleProfile, profile?.Name, StringComparison.OrdinalIgnoreCase))
+        {
+            _consoleProfile = profile?.Name;
+            ConsoleInput.Text = "";
+            MaskConsoleInput.IsChecked = true;
+            ConsoleOutput.Text = "";
+            ConsoleMessage.IsVisible = false;
+        }
         if (profile is null)
             return;
 
@@ -111,18 +140,123 @@ public partial class InstallationPage : ContentPage
             ServerSessionStatus.StopUnconfirmed => "Не удалось подтвердить остановку. Проверь консоль сервера.",
             _ => "Сеанс не отслеживается.",
         };
-        StartServerButton.IsEnabled = _savedInstallationFolder is not null
+        StartServerButton.IsEnabled = !_closeInProgress && _savedInstallationFolder is not null
             && status is not (ServerSessionStatus.Starting or ServerSessionStatus.Running
                 or ServerSessionStatus.Stopping or ServerSessionStatus.StopUnconfirmed);
-        StopServerButton.IsEnabled = status == ServerSessionStatus.Running;
+        StopServerButton.IsEnabled = !_closeInProgress && status == ServerSessionStatus.Running;
         LaunchMessageLabel.Text = _launchMessages.GetValueOrDefault(profile.Name)
             ?? (_savedInstallationFolder is null ? "Выбери папку Dedicated Server, чтобы запустить профиль." : "");
         LaunchMessageLabel.IsVisible = LaunchMessageLabel.Text.Length > 0;
+        var canSend = !_sendingConsole && !_closeInProgress && !_launching.Contains(profile.Name)
+            && status is ServerSessionStatus.Starting or ServerSessionStatus.Running;
+        ConsoleInput.IsEnabled = SendConsoleButton.IsEnabled = canSend;
+        if (ConsolePane.IsVisible)
+        {
+            var tail = _launches.ReadConsole(profile);
+            if (!string.Equals(ConsoleOutput.Text, tail, StringComparison.Ordinal))
+                ConsoleOutput.Text = tail;
+        }
+    }
+
+    private void OnShowProfileClicked(object? sender, EventArgs e) => SetConsoleVisible(false);
+    private void OnShowConsoleClicked(object? sender, EventArgs e) => SetConsoleVisible(true);
+
+    private void SetConsoleVisible(bool visible)
+    {
+        ConsolePane.IsVisible = ShowProfileButton.IsEnabled = visible;
+        ProfilePane.IsVisible = ShowConsoleButton.IsEnabled = !visible;
+        if (_profiles.Selected is { } profile)
+            RefreshSessionStatus(profile);
+    }
+
+    private void OnMaskConsoleChanged(object? sender, CheckedChangedEventArgs e)
+    {
+        if (ConsoleInput is not null)
+            ConsoleInput.IsPassword = e.Value;
+    }
+
+    private async void OnSendConsoleClicked(object? sender, EventArgs e)
+    {
+        if (_closeInProgress || _sendingConsole || _profiles.Selected is not { } profile)
+            return;
+
+        var line = ConsoleInput.Text ?? "";
+        ConsoleInput.Text = "";
+        ConsoleMessage.IsVisible = false;
+        _sendingConsole = true;
+        RefreshSessionStatus(profile);
+        try
+        {
+            var error = await _launches.SendConsoleLineAsync(profile, line);
+            if (error is not null && _profiles.Selected?.Name == profile.Name)
+            {
+                ConsoleMessage.Text = error;
+                ConsoleMessage.IsVisible = true;
+            }
+        }
+        finally
+        {
+            _sendingConsole = false;
+            if (_profiles.Selected is { } selected)
+                RefreshSessionStatus(selected);
+        }
+    }
+
+    private async void OnWindowClosing(AppWindow sender, AppWindowClosingEventArgs args)
+    {
+        if (_canClose)
+            return;
+        if (_closeInProgress)
+        {
+            args.Cancel = true;
+            return;
+        }
+
+        var pending = _launches.PendingShutdownProfiles();
+        if (_launching.Count == 0 && pending.Count == 0)
+            return;
+
+        args.Cancel = true;
+        _closeInProgress = true;
+        ShowSelectedProfile(_profiles.Selected);
+        try
+        {
+            if (!await DisplayAlertAsync("Выход из панели",
+                    "Серверы, запущенные из панели, будут штатно остановлены. Внешние серверы останутся работать.",
+                    "Остановить серверы и выйти", "Отмена"))
+                return;
+
+            var timeout = Stopwatch.StartNew();
+            do
+            {
+                _launches.RequestShutdownStops();
+                pending = _launches.PendingShutdownProfiles();
+                if (pending.Count == 0 && _launching.Count == 0)
+                {
+                    _canClose = true;
+                    _nativeWindow?.Close();
+                    return;
+                }
+                await Task.Delay(250);
+            } while (timeout.Elapsed < TimeSpan.FromSeconds(20));
+
+            // A first-start password prompt may still require input. Leave the panel
+            // and its console available rather than force-killing the server.
+            await DisplayAlertAsync("Панель осталась открыта",
+                "Не подтверждена остановка: " + string.Join(", ", pending.Concat(_launching).Distinct())
+                + ". Если сервер ждёт ввод при запуске, открой его консоль и заверши настройку.", "OK");
+        }
+        finally
+        {
+            _closeInProgress = false;
+            if (!_canClose)
+                ShowSelectedProfile(_profiles.Selected);
+        }
     }
 
     private void OnStopServerClicked(object? sender, EventArgs e)
     {
-        if (_profiles.Selected is not { } profile)
+        if (_closeInProgress || _profiles.Selected is not { } profile)
             return;
 
         _launchMessages.Remove(profile.Name);
@@ -136,7 +270,7 @@ public partial class InstallationPage : ContentPage
     {
         var profile = _profiles.Selected;
         var installation = _savedInstallationFolder;
-        if (profile is null || installation is null || !_launching.Add(profile.Name))
+        if (_closeInProgress || profile is null || installation is null || !_launching.Add(profile.Name))
             return;
 
         _launchMessages.Remove(profile.Name);

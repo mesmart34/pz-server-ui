@@ -6,8 +6,8 @@ namespace PzServerUi.Application;
 
 internal static class WindowsSessionLauncher
 {
-    // The helper owns an isolated console, the child's input, and the per-launch log.
-    // None of those handles belong to the MAUI process.
+    // The headless relay owns the child's input. Commands travel in memory through
+    // its private redirected stdin; only child output is written to the session log.
     private const string ConsoleRelay = """
         $ErrorActionPreference = 'Stop'
         $ProgressPreference = 'SilentlyContinue'
@@ -15,32 +15,22 @@ internal static class WindowsSessionLauncher
         $quit = $env:PZ_PANEL_SESSION_QUIT
         $exitSignal = $env:PZ_PANEL_SESSION_EXIT
         $child = $null
-        $reader = $null
+        $commands = $null
         try {
+            $commands = [IO.StreamReader]::new([Console]::OpenStandardInput(), [Text.Encoding]::UTF8)
+            $line = $commands.ReadLineAsync()
             $start = [Diagnostics.ProcessStartInfo]::new()
             $start.FileName = $env:PZ_PANEL_CMD
             $start.WorkingDirectory = $env:PZ_PANEL_INSTALL
             $start.Arguments = $env:PZ_PANEL_CMD_ARGS + ' > "%PZ_PANEL_SESSION_LOG%" 2>&1'
             $start.UseShellExecute = $false
+            $start.CreateNoWindow = $true
             $start.RedirectStandardInput = $true
             $child = [Diagnostics.Process]::Start($start)
-            $buffer = New-Object char[] 4096
-            $inputLine = [Text.StringBuilder]::new()
             $quitSent = $false
             $quitDelivered = $false
             do {
                 $exited = $child.HasExited
-                try {
-                    if ($null -eq $reader) {
-                        $stream = [IO.File]::Open($log, 'Open', 'Read', ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
-                        $reader = [IO.StreamReader]::new($stream, [Console]::OutputEncoding)
-                    }
-                    for ($chunk = 0; $chunk -lt 16; $chunk++) {
-                        $count = $reader.Read($buffer, 0, $buffer.Length)
-                        if ($count -eq 0) { break }
-                        [Console]::Write($buffer, 0, $count)
-                    }
-                } catch [IO.IOException] { }
                 if (!$exited -and !$quitSent) {
                     if ([IO.File]::Exists($quit)) {
                         $quitSent = $true
@@ -51,23 +41,21 @@ internal static class WindowsSessionLauncher
                         } catch [IO.IOException] { }
                         # EOF also releases the batch file's optional trailing PAUSE.
                         try { $child.StandardInput.Close() } catch [IO.IOException] { }
-                    } else {
-                        # Relay complete lines from our own console. Do not echo passwords.
+                    } elseif ($null -ne $line -and $line.IsCompleted) {
                         try {
-                            $keys = 0
-                            while ($keys -lt 100 -and ![Console]::IsInputRedirected -and [Console]::KeyAvailable) {
-                                $keys++
-                                $key = [Console]::ReadKey($true)
-                                if ($key.Key -eq [ConsoleKey]::Enter) {
-                                    $child.StandardInput.WriteLine($inputLine.ToString())
-                                    $null = $inputLine.Clear()
-                                } elseif ($key.Key -eq [ConsoleKey]::Backspace -and $inputLine.Length -gt 0) {
-                                    $inputLine.Length--
-                                } elseif (![char]::IsControl($key.KeyChar) -and $inputLine.Length -lt 4096) {
-                                    $null = $inputLine.Append($key.KeyChar)
+                            $inputValue = $line.GetAwaiter().GetResult()
+                        } catch [IO.IOException] { $inputValue = $null }
+                        $line = $null
+                        if ($null -ne $inputValue) {
+                            try {
+                                if ($inputValue.Length -le 1024) {
+                                    $child.StandardInput.WriteLine($inputValue)
+                                    $child.StandardInput.Flush()
                                 }
-                            }
-                        } catch [IO.IOException] { } catch [InvalidOperationException] { }
+                            } catch [IO.IOException] { }
+                            $inputValue = $null
+                            $line = $commands.ReadLineAsync()
+                        }
                     }
                 }
                 if (!$exited) { Start-Sleep -Milliseconds 75 }
@@ -75,7 +63,7 @@ internal static class WindowsSessionLauncher
             if ($quitDelivered) { [IO.File]::WriteAllText($exitSignal, '') }
             exit $child.ExitCode
         } finally {
-            if ($null -ne $reader) { $reader.Dispose() }
+            if ($null -ne $commands) { $commands.Dispose() }
             if ($null -ne $child) { $child.Dispose() }
             Remove-Item -LiteralPath $log -ErrorAction SilentlyContinue
             Remove-Item -LiteralPath $quit -ErrorAction SilentlyContinue
@@ -106,8 +94,11 @@ internal static class WindowsSessionLauncher
                 FileName = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe"),
                 WorkingDirectory = launcher.WorkingDirectory,
                 UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardInput = true,
+                StandardInputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
             };
-            foreach (var arg in new[] { "-NoLogo", "-NoProfile", "-EncodedCommand",
+            foreach (var arg in new[] { "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand",
                          Convert.ToBase64String(Encoding.Unicode.GetBytes(ConsoleRelay)) })
                 helper.ArgumentList.Add(arg);
             helper.Environment["PZ_PANEL_SESSION_LOG"] = log;
@@ -117,8 +108,8 @@ internal static class WindowsSessionLauncher
             helper.Environment["PZ_PANEL_INSTALL"] = launcher.WorkingDirectory;
             helper.Environment["PZ_PANEL_CMD_ARGS"] = launcher.Arguments;
 
-            var process = WindowsConsoleProcess.Start(helper);
-            return new WindowsLaunchProcess(process, new ReadinessLog(log), quit, exitSignal);
+            var process = Process.Start(helper) ?? throw new InvalidOperationException("Посредник не был запущен.");
+            return new WindowsLaunchProcess(process, log, quit, exitSignal);
         }
         catch
         {
@@ -128,12 +119,35 @@ internal static class WindowsSessionLauncher
         }
     }
 
-    private sealed class WindowsLaunchProcess(Process process, ReadinessLog log, string quit, string exitSignal)
+    private sealed class WindowsLaunchProcess(Process process, string log, string quit, string exitSignal)
         : IServerLaunchProcess
     {
+        private readonly ReadinessLog _readiness = new(log);
         public bool HasExited => process.HasExited;
         public bool ExitConfirmed => File.Exists(exitSignal);
-        public bool ReadinessConfirmed => log.HasMarker();
+        public bool ReadinessConfirmed => _readiness.HasMarker();
+
+        public string ReadConsoleTail()
+        {
+            try
+            {
+                using var stream = File.Open(log, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                var total = stream.Length;
+                var length = Math.Min(total, 24 * 1024);
+                stream.Position = total - length;
+                var bytes = new byte[(int)length];
+                var count = stream.ReadAtLeast(bytes, bytes.Length, throwOnEndOfStream: false);
+                return Encoding.UTF8.GetString(bytes, 0, count);
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { return ""; }
+        }
+
+        public async Task SendConsoleLineAsync(string line)
+        {
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            await process.StandardInput.WriteLineAsync(line.AsMemory(), deadline.Token);
+            await process.StandardInput.FlushAsync(deadline.Token);
+        }
         public void RequestGracefulStop()
         {
             if (process.HasExited)

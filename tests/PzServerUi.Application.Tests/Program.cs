@@ -2,6 +2,7 @@ using System.Diagnostics;
 using PzServerUi.Application;
 
 using var sandbox = new TestDirectory();
+Environment.SetEnvironmentVariable("LOCALAPPDATA", sandbox.Path);
 var folder = Directory.CreateDirectory(Path.Combine(sandbox.Path, "Dedicated Server")).FullName;
 File.WriteAllText(Path.Combine(folder, "StartServer64.bat"), "@echo off\r\n");
 var selectionFile = Path.Combine(sandbox.Path, "settings", "dedicated-installation.txt");
@@ -237,6 +238,39 @@ Check(sessions.GetStatus(alphaProfile) == ServerSessionStatus.StopUnconfirmed
     "Unexpected relay exit must not be called a graceful stop or allow a duplicate start.");
 Console.WriteLine("PASS: requests a graceful stop only for the selected session and observes its exit");
 
+var shutdownProcesses = new List<FakeLaunchProcess>();
+var shutdown = new ServerLaunches(_ =>
+{
+    var process = new FakeLaunchProcess();
+    shutdownProcesses.Add(process);
+    return process;
+});
+Check(shutdown.Start(launchFolder, namedProfile).Started && shutdown.Start(launchFolder, alphaProfile).Started,
+    "Both profiles should start before the application exit test.");
+shutdownProcesses[0].ConsoleText = "first startup prompt";
+shutdownProcesses[1].ConsoleText = "second startup prompt";
+Check(shutdown.ReadConsole(namedProfile) == "first startup prompt"
+    && shutdown.ReadConsole(alphaProfile) == "second startup prompt"
+    && await shutdown.SendConsoleLineAsync(namedProfile, "startup-response") is null
+    && shutdownProcesses[0].Received.SequenceEqual(new[] { "startup-response" })
+    && shutdownProcesses[1].Received.Count == 0
+    && await shutdown.SendConsoleLineAsync(alphaProfile, "one\ntwo") is not null,
+    "The build must route one line only to the selected session, including before readiness.");
+shutdownProcesses[0].ReadinessConfirmed = true;
+shutdown.RequestShutdownStops();
+Check(shutdownProcesses[0].StopRequests == 1 && shutdownProcesses[1].StopRequests == 0
+    && shutdown.PendingShutdownProfiles().Count == 2,
+    "Shutdown sends quit to ready sessions and waits for starting sessions without entering quit as a password.");
+shutdownProcesses[1].ReadinessConfirmed = true;
+shutdown.RequestShutdownStops();
+Check(shutdownProcesses.All(p => p.StopRequests == 1), "Every owned ready session gets precisely one shutdown request.");
+shutdownProcesses[0].HasExited = true;
+Check(shutdown.PendingShutdownProfiles().SequenceEqual(new[] { alphaProfile.Name }),
+    "The panel must not close while any owned session is still stopping.");
+shutdownProcesses[1].HasExited = true;
+Check(shutdown.PendingShutdownProfiles().Count == 0, "The panel can close only after both sessions exit.");
+Console.WriteLine("PASS: console input is profile-scoped and confirmed app exit waits for all owned sessions");
+
 if (OperatingSystem.IsWindows())
 {
     var exitProbeDirectory = Directory.CreateDirectory(Path.Combine(sandbox.Path, "Early exit probe")).FullName;
@@ -301,13 +335,17 @@ if (OperatingSystem.IsWindows())
         @echo off
         set "PZ_TEST_PROFILE=%~2"
         "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File .\receive.ps1
+        if errorlevel 1 exit /b 1
         pause
         exit /b 0
 
         """ + forwardingScript).ReplaceLineEndings("\r\n"));
     File.WriteAllText(Path.Combine(stopProbeDirectory, "receive.ps1"), """
-        Write-Output 'LOG  : Network      f:0 st:775,941,047> *** SERVER STARTED ****'
+        Write-Output "Startup prompt for ${env:PZ_TEST_PROFILE}"
         $stream = [IO.StreamReader]::new([Console]::OpenStandardInput())
+        $setup = $stream.ReadLineAsync()
+        if (!$setup.Wait(15000) -or $setup.Result -ne "setup ${env:PZ_TEST_PROFILE}") { exit 2 }
+        Write-Output 'LOG  : Network      f:0 st:775,941,047> *** SERVER STARTED ****'
         $line = $stream.ReadLineAsync()
         if (!$line.Wait(25000)) { exit 1 }
         $received = Join-Path $PWD "$env:PZ_TEST_PROFILE.command.txt"
@@ -324,6 +362,14 @@ if (OperatingSystem.IsWindows())
         Check(concurrentSessions.Start(stopProbeDirectory, namedProfile).Started
             && concurrentSessions.Start(stopProbeDirectory, alphaProfile).Started,
             "Both profiles must launch from the same Windows installation.");
+        await WaitUntil(() => concurrentSessions.ReadConsole(namedProfile).Contains($"Startup prompt for {namedProfile.Name}")
+            && concurrentSessions.ReadConsole(alphaProfile).Contains($"Startup prompt for {alphaProfile.Name}"),
+            "Both headless processes should show their own startup prompt.");
+        Check(!concurrentSessions.ReadConsole(namedProfile).Contains($"Startup prompt for {alphaProfile.Name}"),
+            "One profile must not show another profile's output.");
+        var firstSend = await concurrentSessions.SendConsoleLineAsync(namedProfile, $"setup {namedProfile.Name}");
+        var secondSend = await concurrentSessions.SendConsoleLineAsync(alphaProfile, $"setup {alphaProfile.Name}");
+        Check(firstSend is null && secondSend is null, $"Headless input was not sent: first={firstSend}, second={secondSend}");
         await WaitUntil(() => concurrentSessions.GetStatus(namedProfile) == ServerSessionStatus.Running
             && concurrentSessions.GetStatus(alphaProfile) == ServerSessionStatus.Running,
             "Both Windows sessions must reach readiness at the same time.");
@@ -341,7 +387,9 @@ if (OperatingSystem.IsWindows())
         Check(concurrentSessions.GetStatus(alphaProfile) == ServerSessionStatus.Running
             && !File.Exists(CommandPath(alphaProfile)), "The other session must still run and not have received a command.");
 
-        Check(concurrentSessions.RequestStop(alphaProfile).Accepted, "The other session should still accept its own stop.");
+        concurrentSessions.RequestShutdownStops();
+        Check(concurrentSessions.PendingShutdownProfiles().SequenceEqual(new[] { alphaProfile.Name }),
+            "Shutdown must wait for the other session to exit.");
         await WaitUntil(() => File.Exists(CommandPath(alphaProfile)), "Quit did not reach the other process.");
         Check(File.ReadAllText(CommandPath(alphaProfile)) == "quit", "The other process received an unexpected command.");
         File.WriteAllText(ReleasePath(alphaProfile), "");
@@ -355,8 +403,12 @@ if (OperatingSystem.IsWindows())
             File.WriteAllText(ReleasePath(profile), "");
             concurrentSessions.RequestStop(profile);
         }
+        var cleanup = Stopwatch.StartNew();
+        while (concurrentSessions.PendingShutdownProfiles().Count > 0
+            && cleanup.Elapsed < TimeSpan.FromSeconds(18))
+            await Task.Delay(100);
     }
-    Console.WriteLine("PASS: two Windows relays from one installation stop independently, even with PAUSE");
+    Console.WriteLine("PASS: two headless Windows sessions accept separate startup input and quit, even with PAUSE");
 }
 
 static async Task WaitUntil(Func<bool> condition, string message)
@@ -379,7 +431,16 @@ sealed class TestDirectory : IDisposable
 {
     public string Path { get; } = Directory.CreateTempSubdirectory("pz-installation-test-").FullName;
 
-    public void Dispose() => Directory.Delete(Path, recursive: true);
+    public void Dispose()
+    {
+        try { Directory.Delete(Path, recursive: true); }
+        catch (IOException error)
+        {
+            // A failing child fixture can retain a log handle briefly. Do not mask
+            // the actual assertion failure as a directory cleanup error.
+            Console.Error.WriteLine($"Could not clean the temporary fixture directory: {error.Message}");
+        }
+    }
 }
 
 sealed class FakeLaunchProcess : IServerLaunchProcess
@@ -388,6 +449,14 @@ sealed class FakeLaunchProcess : IServerLaunchProcess
     public bool ExitConfirmed { get; set; } = true;
     public bool ReadinessConfirmed { get; set; }
     public int StopRequests { get; private set; }
+    public string ConsoleText { get; set; } = "";
+    public List<string> Received { get; } = [];
     public void RequestGracefulStop() => StopRequests++;
+    public string ReadConsoleTail() => ConsoleText;
+    public Task SendConsoleLineAsync(string line)
+    {
+        Received.Add(line);
+        return Task.CompletedTask;
+    }
     public void Dispose() { }
 }

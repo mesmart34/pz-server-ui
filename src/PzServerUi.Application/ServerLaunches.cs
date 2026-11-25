@@ -10,6 +10,8 @@ public interface IServerLaunchProcess : IDisposable
     bool ExitConfirmed { get; }
     bool ReadinessConfirmed { get; }
     void RequestGracefulStop();
+    string ReadConsoleTail();
+    Task SendConsoleLineAsync(string line);
 }
 
 public enum ServerSessionStatus
@@ -44,6 +46,59 @@ public sealed class ServerLaunches(Func<ProcessStartInfo, IServerLaunchProcess> 
     private readonly Dictionary<string, Session> _sessions = new(StringComparer.OrdinalIgnoreCase);
 
     public ServerLaunches() : this(WindowsSessionLauncher.Start) { }
+
+    public string ReadConsole(ServerProfile profile)
+    {
+        lock (_gate)
+            return _sessions.GetValueOrDefault(profile.Name)?.Process?.ReadConsoleTail() ?? "";
+    }
+
+    public async Task<string?> SendConsoleLineAsync(ServerProfile profile, string line)
+    {
+        if (line.Length > 1024 || line.Any(char.IsControl))
+            return "Введи одну строку длиной до 1024 символов без управляющих символов.";
+
+        IServerLaunchProcess process;
+        lock (_gate)
+        {
+            if (Observe(profile.Name) is not (ServerSessionStatus.Starting or ServerSessionStatus.Running))
+                return "Консоль этого сеанса недоступна.";
+            process = _sessions[profile.Name].Process!;
+        }
+
+        try
+        {
+            await process.SendConsoleLineAsync(line);
+            return null;
+        }
+        catch (Exception error) when (error is IOException or InvalidOperationException or
+            UnauthorizedAccessException or TimeoutException or OperationCanceledException)
+        {
+            // Do not put the entered command or password into diagnostics.
+            return $"Не удалось передать ввод ({error.GetType().Name}, 0x{error.HResult:X8}). Проверь состояние сеанса.";
+        }
+    }
+
+    public IReadOnlyList<string> PendingShutdownProfiles()
+    {
+        lock (_gate)
+            return _sessions.Keys.Where(name => Observe(name) is ServerSessionStatus.Starting
+                or ServerSessionStatus.Running or ServerSessionStatus.Stopping
+                or ServerSessionStatus.StopUnconfirmed).ToArray();
+    }
+
+    public void RequestShutdownStops()
+    {
+        lock (_gate)
+        {
+            foreach (var name in _sessions.Keys)
+            {
+                // During first launch stdin can be a password prompt rather than a command console.
+                if (Observe(name) == ServerSessionStatus.Running)
+                    RequestStop(new ServerProfile(name, "", null));
+            }
+        }
+    }
 
     public ServerStopResult RequestStop(ServerProfile profile)
     {
