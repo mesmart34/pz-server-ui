@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="src/PzServerUi/PzServerUi.csproj" />
+  <Project Path="src/PzServerUi.Application/PzServerUi.Application.csproj" />
+  <Project Path="tests/PzServerUi.Application.Tests/PzServerUi.Application.Tests.csproj" />
+</Solution>
