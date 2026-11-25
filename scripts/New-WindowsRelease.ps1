@@ -21,8 +21,7 @@ $app = Join-Path $repo 'src/PzServerUi/PzServerUi.csproj'
 $name = "PzServerUi-v$BuildVersion-win-x64"
 $out = New-Item -ItemType Directory -Force $OutputDirectory
 $publish = Join-Path $out.FullName $name
-$package = Join-Path $out.FullName "$name.exe"
-if ((Test-Path -LiteralPath $publish) -or (Test-Path -LiteralPath $package)) {
+if (Test-Path -LiteralPath $publish) {
     throw "Choose a fresh output directory: $name already exists in $($out.FullName)."
 }
 
@@ -55,5 +54,5 @@ $info = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($files[0].FullName)
 if ($info.ProductVersion -cne $BuildVersion) {
     throw "Expected EXE product version $BuildVersion, got $($info.ProductVersion)."
 }
-Move-Item -LiteralPath $files[0].FullName -Destination $package
-Write-Host "Created $package from $commit"
+# Keep the original filename: WinUI resolves the embedded application PRI by its executable name.
+Write-Host "Created $($files[0].FullName) from $commit"
