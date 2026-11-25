@@ -42,7 +42,7 @@ jobs:
             $version = "0.0.0-ci.$env:GITHUB_RUN_NUMBER.$env:GITHUB_RUN_ATTEMPT"
           }
           "version=$version" >> $env:GITHUB_OUTPUT
-          "package=PzServerUi-v$version-win-x64.zip" >> $env:GITHUB_OUTPUT
+          "package=PzServerUi-v$version-win-x64.exe" >> $env:GITHUB_OUTPUT
 
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
@@ -54,18 +54,17 @@ jobs:
       - name: Install .NET MAUI for Windows
         run: dotnet workload install maui-windows
 
-      - name: Publish self-contained Windows x64 ZIP
+      - name: Publish single-file Windows x64 EXE
         shell: pwsh
         env:
           BUILD_VERSION: ${{ steps.version.outputs.version }}
-        run: ./scripts/New-WindowsRelease.ps1 -BuildVersion $env:BUILD_VERSION -OutputDirectory "$env:RUNNER_TEMP/archives"
+        run: ./scripts/New-WindowsRelease.ps1 -BuildVersion $env:BUILD_VERSION -OutputDirectory "$env:RUNNER_TEMP/packages"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: windows-release
-          path: ${{ runner.temp }}/archives/${{ steps.version.outputs.package }}
+          archive: false
+          path: ${{ runner.temp }}/packages/${{ steps.version.outputs.package }}
           if-no-files-found: error
-          compression-level: 0
 
   release:
     if: ${{ github.event_name == 'push' && github.ref_type == 'tag' }}
@@ -77,7 +76,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: windows-release
+          name: ${{ needs.build.outputs.package }}
           path: release
 
       - name: Publish GitHub Release
