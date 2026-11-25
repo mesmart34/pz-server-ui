@@ -19,6 +19,9 @@ public partial class InstallationPage : ContentPage
     private readonly HashSet<string> _launching = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _launchMessages = new(StringComparer.OrdinalIgnoreCase);
     private string? _savedInstallationFolder;
+    private string? _scanInstallation;
+    private Task<ExternalServerScan>? _scanInFlight;
+    private ExternalServerScan? _external;
     private bool _updatingProfiles;
     private string? _consoleProfile;
     private bool _sendingConsole;
@@ -47,25 +50,55 @@ public partial class InstallationPage : ContentPage
             if (ProfileDetails.IsVisible && _profiles.Selected is { } profile)
                 RefreshSessionStatus(profile);
         };
-        Loaded += (_, _) =>
+        var externalTimer = Dispatcher.CreateTimer();
+        externalTimer.Interval = TimeSpan.FromSeconds(8);
+        externalTimer.Tick += async (_, _) => await RefreshExternalServersAsync();
+        Loaded += async (_, _) =>
         {
             statusTimer.Start();
+            externalTimer.Start();
             if (_nativeWindow is null && Window?.Handler?.PlatformView is Microsoft.UI.Xaml.Window native)
             {
                 _nativeWindow = native;
                 native.AppWindow.Closing += OnWindowClosing;
             }
+            await RefreshExternalServersAsync();
         };
         Unloaded += (_, _) =>
         {
             statusTimer.Stop();
+            externalTimer.Stop();
             if (_nativeWindow is not null)
                 _nativeWindow.AppWindow.Closing -= OnWindowClosing;
             _nativeWindow = null;
         };
     }
 
-    private void OnRefreshProfilesClicked(object? sender, EventArgs e) => RefreshProfiles();
+    private async void OnRefreshProfilesClicked(object? sender, EventArgs e)
+    {
+        RefreshProfiles();
+        await RefreshExternalServersAsync();
+    }
+
+    private async Task<ExternalServerScan?> RefreshExternalServersAsync()
+    {
+        var installation = _savedInstallationFolder;
+        if (installation is null)
+            return null;
+
+        if (_scanInFlight is not { IsCompleted: false } || _scanInstallation != installation)
+        {
+            _scanInstallation = installation;
+            _scanInFlight = WindowsExternalServers.ScanAsync(installation);
+        }
+        var result = await _scanInFlight;
+        if (_savedInstallationFolder != installation)
+            return null;
+        _external = result;
+        if (ProfileDetails.IsVisible && _profiles.Selected is { } profile)
+            RefreshSessionStatus(profile);
+        return result;
+    }
 
     private void RefreshProfiles()
     {
@@ -129,6 +162,9 @@ public partial class InstallationPage : ContentPage
         var status = _launching.Contains(profile.Name)
             ? ServerSessionStatus.Starting
             : _launches.GetStatus(profile);
+        var external = _external?.GetStatus(profile.Name) ?? ExternalServerStatus.NotObserved;
+        var ownActive = status is ServerSessionStatus.Starting or ServerSessionStatus.Running
+            or ServerSessionStatus.Stopping or ServerSessionStatus.StopUnconfirmed;
         SessionStatusLabel.Text = status switch
         {
             ServerSessionStatus.Starting => "Запускается. Готовность не подтверждена.",
@@ -140,9 +176,19 @@ public partial class InstallationPage : ContentPage
             ServerSessionStatus.StopUnconfirmed => "Не удалось подтвердить остановку. Проверь консоль сервера.",
             _ => "Сеанс не отслеживается.",
         };
+        if (!ownActive)
+        {
+            SessionStatusLabel.Text = external switch
+            {
+                ExternalServerStatus.ProcessObserved => "Процесс запущен, готовность не подтверждена (внешний сеанс).",
+                ExternalServerStatus.Ambiguous => "Внешний сеанс не определён однозначно: несколько процессов с этим именем.",
+                _ when status == ServerSessionStatus.NotObserved && _external is { Available: false }
+                    => "Не удалось проверить внешние сеансы.",
+                _ => SessionStatusLabel.Text,
+            };
+        }
         StartServerButton.IsEnabled = !_closeInProgress && _savedInstallationFolder is not null
-            && status is not (ServerSessionStatus.Starting or ServerSessionStatus.Running
-                or ServerSessionStatus.Stopping or ServerSessionStatus.StopUnconfirmed);
+            && !ownActive && external == ExternalServerStatus.NotObserved;
         StopServerButton.IsEnabled = !_closeInProgress && status == ServerSessionStatus.Running;
         LaunchMessageLabel.Text = _launchMessages.GetValueOrDefault(profile.Name)
             ?? (_savedInstallationFolder is null ? "Выбери папку Dedicated Server, чтобы запустить профиль." : "");
@@ -277,6 +323,19 @@ public partial class InstallationPage : ContentPage
         ShowSelectedProfile(profile);
         try
         {
+            var scan = await RefreshExternalServersAsync();
+            if (_closeInProgress)
+                return;
+            if (_savedInstallationFolder != installation)
+            {
+                _launchMessages[profile.Name] = "Папка установки изменилась. Запусти профиль снова.";
+                return;
+            }
+            if (scan?.GetStatus(profile.Name) is ExternalServerStatus.ProcessObserved or ExternalServerStatus.Ambiguous)
+            {
+                _launchMessages[profile.Name] = "Внешний процесс уже запущен или не определяется однозначно. Второй запуск не выполнен.";
+                return;
+            }
             var result = await Task.Run(() => _launches.Start(installation, profile));
             if (!result.Started)
                 _launchMessages[profile.Name] = result.Message;
@@ -310,7 +369,10 @@ public partial class InstallationPage : ContentPage
 
             var result = _installation.SelectFolder(folder.Path);
             if (result.Accepted)
+            {
                 RefreshSavedFolder();
+                await RefreshExternalServersAsync();
+            }
 
             ShowMessage(result.Error ?? "Папка Dedicated Server сохранена.");
         }
@@ -327,7 +389,10 @@ public partial class InstallationPage : ContentPage
 
     private void RefreshSavedFolder()
     {
-        _savedInstallationFolder = _installation.SavedFolder;
+        var folder = _installation.SavedFolder;
+        if (_savedInstallationFolder != folder)
+            _external = null;
+        _savedInstallationFolder = folder;
         SavedFolderLabel.Text = _savedInstallationFolder ?? "Папка пока не выбрана.";
         if (ProfileDetails.IsVisible)
             ShowSelectedProfile(_profiles.Selected);
