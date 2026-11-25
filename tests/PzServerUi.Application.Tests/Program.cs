@@ -105,6 +105,36 @@ profiles.Refresh();
 Check(profiles.Selected?.Name == "alpha", "Refreshing after the selected profile is removed must not keep stale details.");
 Console.WriteLine("PASS: discovers named profiles without modifying data and keeps details in sync with selection");
 
+var modProfiles = new ServerProfiles(Path.Combine(sandbox.Path, "Mods fixture"));
+Directory.CreateDirectory(modProfiles.ConfigurationDirectory);
+var moddedIni = Path.Combine(modProfiles.ConfigurationDirectory, "modded.ini");
+var plainIni = Path.Combine(modProfiles.ConfigurationDirectory, "plain.ini");
+File.WriteAllText(moddedIni, "# Mods=commented\r\nMods=\\ZedFirst; Alpha Patches;;\\ZedFirst\r\n"
+    + "WorkshopItems=0098765;1234;\r\nMap=IgnoreMe\r\n");
+File.WriteAllText(plainIni, "Mods= ; ;\n");
+var moddedBytes = File.ReadAllBytes(moddedIni);
+var plainBytes = File.ReadAllBytes(plainIni);
+modProfiles.Refresh();
+modProfiles.Select("modded");
+var configuredMods = ServerProfileMods.Read(modProfiles.Selected!);
+Check(configuredMods.ModIds.SequenceEqual(new[] { @"\ZedFirst", "Alpha Patches", @"\ZedFirst" })
+    && configuredMods.WorkshopIds.SequenceEqual(new[] { "0098765", "1234" }),
+    "Mod IDs and Workshop IDs must come from separate fields, preserving spelling, duplicates and order.");
+modProfiles.Select("plain");
+var plainMods = ServerProfileMods.Read(modProfiles.Selected!);
+Check(plainMods.ModIds.Count == 0 && plainMods.WorkshopIds.Count == 0,
+    "An empty Mods field and an absent WorkshopItems field are both empty, not stale data from another profile.");
+Check(File.ReadAllBytes(moddedIni).SequenceEqual(moddedBytes)
+    && File.ReadAllBytes(plainIni).SequenceEqual(plainBytes),
+    "Viewing mods cannot change a profile's INI.");
+File.AppendAllText(plainIni, "Mods=SecondValue\n");
+CheckThrows<InvalidDataException>(() => ServerProfileMods.Read(modProfiles.Selected!),
+    "Conflicting keys must not be reported as a definitive configured list.");
+File.Delete(plainIni);
+CheckThrows<FileNotFoundException>(() => ServerProfileMods.Read(modProfiles.Selected!),
+    "A deleted INI is an error, not an empty mod list.");
+Console.WriteLine("PASS: reads the selected profile's Mod IDs and Workshop IDs without modifying its INI");
+
 var sandboxProfile = profiles.Items.Single(profile => profile.Name == "alpha");
 var sandboxPath = Path.Combine(configDirectory, "alpha_SandboxVars.lua");
 CheckThrows<FileNotFoundException>(() => SandboxSettings.Open(sandboxProfile),

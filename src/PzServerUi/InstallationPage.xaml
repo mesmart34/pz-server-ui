@@ -72,10 +72,14 @@
                                 <Button x:Name="StopServerButton" Text="Остановить" Clicked="OnStopServerClicked" />
                             </HorizontalStackLayout>
                             <Label x:Name="LaunchMessageLabel" IsVisible="False" LineBreakMode="WordWrap" />
-                            <HorizontalStackLayout Spacing="8">
-                                <Button x:Name="ShowProfileButton" Text="Профиль" Clicked="OnShowProfileClicked" IsEnabled="False" />
-                                <Button x:Name="ShowConsoleButton" Text="Консоль" Clicked="OnShowConsoleClicked" />
-                            </HorizontalStackLayout>
+                            <FlexLayout Wrap="Wrap">
+                                <Button x:Name="ShowProfileButton" Text="Профиль" Clicked="OnShowProfileClicked"
+                                        IsEnabled="False" Margin="0,0,8,4" />
+                                <Button x:Name="ShowModsButton" Text="Моды" Clicked="OnShowModsClicked"
+                                        Margin="0,0,8,4" />
+                                <Button x:Name="ShowConsoleButton" Text="Консоль" Clicked="OnShowConsoleClicked"
+                                        Margin="0,0,0,4" />
+                            </FlexLayout>
                             <VerticalStackLayout x:Name="ProfilePane" Spacing="6">
                                 <Label Text="Файл настроек" FontAttributes="Bold" />
                                 <Label x:Name="ProfileConfigurationLabel" LineBreakMode="CharacterWrap" />
@@ -104,6 +108,20 @@
                                     <Button Text="Перечитать файл" Margin="0,0,0,4" Clicked="OnReloadSandboxClicked" />
                                 </FlexLayout>
                                 <Label x:Name="SandboxMessage" IsVisible="False" LineBreakMode="WordWrap" />
+                            </VerticalStackLayout>
+                            <VerticalStackLayout x:Name="ModsPane" IsVisible="False" Spacing="8">
+                                <Label Text="Моды выбранного профиля" FontSize="18" FontAttributes="Bold"
+                                       SemanticProperties.HeadingLevel="Level2" />
+                                <Label Text="Список из INI. Он не показывает, какие моды загружены в текущем сеансе."
+                                       LineBreakMode="WordWrap" />
+                                <VerticalStackLayout x:Name="ModLists" Spacing="5">
+                                    <Label Text="Mod ID (Mods)" FontAttributes="Bold" SemanticProperties.HeadingLevel="Level3" />
+                                    <Label x:Name="ModIdsLabel" LineBreakMode="CharacterWrap" />
+                                    <Label Text="Workshop ID (WorkshopItems)" Margin="0,6,0,0" FontAttributes="Bold"
+                                           SemanticProperties.HeadingLevel="Level3" />
+                                    <Label x:Name="WorkshopIdsLabel" LineBreakMode="CharacterWrap" />
+                                </VerticalStackLayout>
+                                <Label x:Name="ModsReadError" IsVisible="False" LineBreakMode="WordWrap" />
                             </VerticalStackLayout>
                             <VerticalStackLayout x:Name="ConsolePane" IsVisible="False" Spacing="6">
                                 <Editor x:Name="ConsoleOutput" IsReadOnly="True" HeightRequest="280"
