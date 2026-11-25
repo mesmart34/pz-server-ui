@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using PzServerUi.Application;
 
 using var sandbox = new TestDirectory();
@@ -93,6 +94,87 @@ profiles.Refresh();
 Check(profiles.Selected?.Name == "alpha", "Refreshing after the selected profile is removed must not keep stale details.");
 Console.WriteLine("PASS: discovers named profiles without modifying data and keeps details in sync with selection");
 
+var launchFolder = Directory.CreateDirectory(Path.Combine(sandbox.Path, "Server Install & Tools")).FullName;
+var launcherPath = Path.Combine(launchFolder, "StartServer64.bat");
+const string forwardingScript = "@echo off\r\n\".\\jre64\\bin\\java.exe\" -Xmx2g zombie.network.GameServer -statistic 0 %1 %2\r\n";
+File.WriteAllText(launcherPath, forwardingScript);
+var namedConfig = Path.Combine(configDirectory, "Second world.ini");
+File.WriteAllText(namedConfig, "PublicName=Second\n");
+profiles.Refresh();
+profiles.Select("Second world");
+var namedProfile = profiles.Selected!;
+var requests = new List<ProcessStartInfo>();
+var processes = new List<FakeLaunchProcess>();
+var launches = new ServerLaunches(request =>
+{
+    requests.Add(request);
+    var process = new FakeLaunchProcess();
+    processes.Add(process);
+    return process;
+});
+
+Check(launches.Start(launchFolder, namedProfile).Started, "A compatible dedicated launcher should start the selected profile.");
+Check(requests.Count == 1 && Path.GetFileName(requests[0].FileName) == "cmd.exe"
+    && requests[0].WorkingDirectory == launchFolder
+    && requests[0].Arguments == "/d /v:off /c .\\StartServer64.bat -servername \"Second world\"",
+    "The exact selected name should be sent to the vendor launcher in the selected installation.");
+Check(!launches.Start(launchFolder, namedProfile).Started && requests.Count == 1,
+    "Repeating the same launch must not start a second process while the launcher is active.");
+profiles.Select("alpha");
+Check(launches.Start(launchFolder, profiles.Selected!).Started && requests.Count == 2,
+    "A different selected profile must not be blocked by another profile's launch.");
+processes[0].HasExited = true;
+Check(launches.Start(launchFolder, namedProfile).Started && requests.Count == 3,
+    "A profile may launch again once its prior launcher has exited.");
+Check(File.ReadAllText(launcherPath) == forwardingScript
+    && File.ReadAllText(alphaConfig) == "PublicName=Alpha\n"
+    && File.ReadAllText(namedConfig) == "PublicName=Second\n", "Launching must not rewrite scripts or profiles.");
+Console.WriteLine("PASS: routes a dedicated launch to the selected profile and prevents duplicate requests");
+
+processes[2].HasExited = true;
+File.WriteAllText(launcherPath, forwardingScript.Replace(" %1 %2", ""));
+Check(!launches.Start(launchFolder, namedProfile).Started && requests.Count == 3,
+    "A launcher that ignores the profile argument must not fall back to the default profile.");
+File.WriteAllText(launcherPath, forwardingScript.Replace(" %1 %2", " -servername servertest %1 %2"));
+Check(!launches.Start(launchFolder, namedProfile).Started && requests.Count == 3,
+    "A launcher with a hard-coded profile must not be started.");
+File.WriteAllText(launcherPath, forwardingScript);
+var unsafePath = Path.Combine(configDirectory, "risk%TEMP%.ini");
+File.WriteAllText(unsafePath, "");
+Check(!launches.Start(launchFolder, new ServerProfile("risk%TEMP%", unsafePath, null)).Started && requests.Count == 3,
+    "A profile containing cmd expansion characters must not be passed to the shell.");
+Check(!launches.Start(null, namedProfile).Started && requests.Count == 3,
+    "Without a selected installation, the launch must not choose any fallback executable.");
+if (OperatingSystem.IsWindows())
+{
+    var unc = launches.Start(@"\\example\servers", namedProfile);
+    Check(!unc.Started && unc.Message.Contains("сетевому", StringComparison.Ordinal) && requests.Count == 3,
+        "A UNC working directory must be rejected before invoking cmd.");
+}
+Console.WriteLine("PASS: refuses incompatible launchers and unsafe or incomplete requests");
+
+if (OperatingSystem.IsWindows())
+{
+    var probeDirectory = Directory.CreateDirectory(Path.Combine(sandbox.Path, "Argument probe & spaces")).FullName;
+    File.WriteAllText(Path.Combine(probeDirectory, "StartServer64.bat"),
+        "@echo off\r\necho %~1\r\necho %~2\r\n");
+    using var probe = Process.Start(new ProcessStartInfo
+    {
+        FileName = requests[0].FileName,
+        Arguments = requests[0].Arguments,
+        WorkingDirectory = probeDirectory,
+        UseShellExecute = false,
+        CreateNoWindow = true,
+        RedirectStandardOutput = true,
+    }) ?? throw new InvalidOperationException("The Windows argument probe did not start.");
+    var received = await probe.StandardOutput.ReadToEndAsync().WaitAsync(TimeSpan.FromSeconds(10));
+    await probe.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+    Check(probe.ExitCode == 0 && received.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+        .SequenceEqual(new[] { "-servername", "Second world" }),
+        "Windows cmd must deliver the full name as one argument, without interpreting the installation path.");
+    Console.WriteLine("PASS: Windows batch argument probe preserves a profile name with spaces");
+}
+
 static void Check(bool condition, string message)
 {
     if (!condition)
@@ -104,4 +186,10 @@ sealed class TestDirectory : IDisposable
     public string Path { get; } = Directory.CreateTempSubdirectory("pz-installation-test-").FullName;
 
     public void Dispose() => Directory.Delete(Path, recursive: true);
+}
+
+sealed class FakeLaunchProcess : IServerLaunchProcess
+{
+    public bool HasExited { get; set; }
+    public void Dispose() { }
 }

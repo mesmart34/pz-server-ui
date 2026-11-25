@@ -13,6 +13,10 @@ public partial class InstallationPage : ContentPage
     private readonly ServerProfiles _profiles = new(Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile, Environment.SpecialFolderOption.DoNotVerify),
         "Zomboid"));
+    private readonly ServerLaunches _launches = new();
+    private readonly HashSet<string> _launching = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _launchMessages = new(StringComparer.OrdinalIgnoreCase);
+    private string? _savedInstallationFolder;
     private bool _updatingProfiles;
 
     public InstallationPage()
@@ -79,6 +83,32 @@ public partial class InstallationPage : ContentPage
         ProfileNameLabel.Text = profile.Name;
         ProfileConfigurationLabel.Text = profile.ConfigurationPath;
         ProfileWorldLabel.Text = profile.WorldPath ?? "Папка мира ещё не найдена.";
+        var launching = _launching.Contains(profile.Name);
+        StartServerButton.IsEnabled = !launching && _savedInstallationFolder is not null;
+        LaunchMessageLabel.Text = launching ? "Запускается…" : _launchMessages.GetValueOrDefault(profile.Name)
+            ?? (_savedInstallationFolder is null ? "Выбери папку Dedicated Server, чтобы запустить профиль." : "");
+        LaunchMessageLabel.IsVisible = LaunchMessageLabel.Text.Length > 0;
+    }
+
+    private async void OnStartServerClicked(object? sender, EventArgs e)
+    {
+        var profile = _profiles.Selected;
+        var installation = _savedInstallationFolder;
+        if (profile is null || installation is null || !_launching.Add(profile.Name))
+            return;
+
+        ShowSelectedProfile(profile);
+        try
+        {
+            var result = await Task.Run(() => _launches.Start(installation, profile));
+            _launchMessages[profile.Name] = result.Message;
+        }
+        finally
+        {
+            _launching.Remove(profile.Name);
+            if (ProfileDetails.IsVisible)
+                ShowSelectedProfile(_profiles.Selected);
+        }
     }
 
     private async void OnChooseFolderClicked(object? sender, EventArgs e)
@@ -117,8 +147,13 @@ public partial class InstallationPage : ContentPage
         }
     }
 
-    private void RefreshSavedFolder() =>
-        SavedFolderLabel.Text = _installation.SavedFolder ?? "Папка пока не выбрана.";
+    private void RefreshSavedFolder()
+    {
+        _savedInstallationFolder = _installation.SavedFolder;
+        SavedFolderLabel.Text = _savedInstallationFolder ?? "Папка пока не выбрана.";
+        if (ProfileDetails.IsVisible)
+            ShowSelectedProfile(_profiles.Selected);
+    }
 
     private void ShowMessage(string message)
     {
