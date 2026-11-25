@@ -19,6 +19,14 @@ public partial class InstallationPage : ContentPage
     private readonly ServerLaunches _launches = new();
     private readonly HashSet<string> _launching = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _launchMessages = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, long> _pendingSettings = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, long> _settingsAtLaunch = new(StringComparer.OrdinalIgnoreCase);
+    private long _settingsRevision;
+    private ProfileRow[] _profileRows = [];
+    private ServerProfileMods? _modSnapshot;
+    private string? _consoleTail;
+    private bool _compact;
+    private bool _showCompactProfiles;
     private string? _savedInstallationFolder;
     private string? _scanInstallation;
     private Task<ExternalServerScan>? _scanInFlight;
@@ -37,6 +45,9 @@ public partial class InstallationPage : ContentPage
     public InstallationPage()
     {
         InitializeComponent();
+        ConsoleLevelPicker.ItemsSource = new[] { "Все уровни", "LOG", "WARN", "ERROR", "DEBUG", "Без уровня" };
+        ConsoleLevelPicker.SelectedIndex = 0;
+        ShowPane(OverviewPane);
 
         try
         {
@@ -50,11 +61,7 @@ public partial class InstallationPage : ContentPage
         RefreshProfiles();
         var statusTimer = Dispatcher.CreateTimer();
         statusTimer.Interval = TimeSpan.FromSeconds(1);
-        statusTimer.Tick += (_, _) =>
-        {
-            if (ProfileDetails.IsVisible && _profiles.Selected is { } profile)
-                RefreshSessionStatus(profile);
-        };
+        statusTimer.Tick += (_, _) => RefreshStatuses();
         var externalTimer = Dispatcher.CreateTimer();
         externalTimer.Interval = TimeSpan.FromSeconds(8);
         externalTimer.Tick += async (_, _) => await RefreshExternalServersAsync();
@@ -100,44 +107,102 @@ public partial class InstallationPage : ContentPage
         if (_savedInstallationFolder != installation)
             return null;
         _external = result;
-        if (ProfileDetails.IsVisible && _profiles.Selected is { } profile)
-            RefreshSessionStatus(profile);
+        RefreshStatuses();
         return result;
     }
 
     private void RefreshProfiles()
     {
-        _updatingProfiles = true;
         try
         {
             _profiles.Refresh();
-            ProfileList.ItemsSource = _profiles.Items;
-            ProfileList.SelectedItem = _profiles.Selected;
-            ProfileListMessage.Text = _profiles.Items.Count == 0
-                ? $"Профили не найдены. Здесь появятся существующие конфигурации из {_profiles.ConfigurationDirectory}."
-                : string.Empty;
+            _profileRows = _profiles.Items.Select(profile => new ProfileRow(profile)).ToArray();
+            ApplyProfileFilter();
             ShowSelectedProfile(_profiles.Selected);
+            LoadOverview(_profiles.Selected);
+            RefreshStatuses();
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {
-            ProfileList.ItemsSource = null;
+            _profileRows = [];
+            ApplyProfileFilter();
             ProfileListMessage.Text = $"Не удалось прочитать папку {_profiles.ConfigurationDirectory}. Проверь доступ и обнови список.";
+            ProfileListMessage.IsVisible = true;
             ShowSelectedProfile(null);
+        }
+    }
+
+    private void OnProfileSearchChanged(object? sender, TextChangedEventArgs e)
+    {
+        if (ProfileList is not null)
+            ApplyProfileFilter();
+    }
+
+    private void ApplyProfileFilter()
+    {
+        _updatingProfiles = true;
+        try
+        {
+            var rows = _profileRows.Where(row => OverviewQueries.Matches(row.Name, ProfileSearch.Text)).ToArray();
+            ProfileList.ItemsSource = rows;
+            ProfileList.SelectedItem = rows.FirstOrDefault(row => row.Name == _profiles.Selected?.Name);
+            ProfileCountLabel.Text = $"Профили · {_profileRows.Length}";
+            ProfileListMessage.Text = _profileRows.Length == 0
+                ? $"Профили не найдены в {_profiles.ConfigurationDirectory}."
+                : rows.Length == 0 ? "Нет совпадений." : "";
+            ProfileListMessage.IsVisible = ProfileListMessage.Text.Length != 0;
         }
         finally
         {
-            ProfileListMessage.IsVisible = !string.IsNullOrEmpty(ProfileListMessage.Text);
             _updatingProfiles = false;
         }
     }
 
     private void OnProfileSelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
-        if (_updatingProfiles || e.CurrentSelection.FirstOrDefault() is not ServerProfile profile)
+        if (_updatingProfiles || e.CurrentSelection.FirstOrDefault() is not ProfileRow row)
             return;
 
-        _profiles.Select(profile.Name);
+        _profiles.Select(row.Name);
         ShowSelectedProfile(_profiles.Selected);
+        if (_compact)
+        {
+            _showCompactProfiles = false;
+            UpdateWorkspaceLayout();
+            ToggleProfilesButton.Focus();
+        }
+    }
+
+    private void OnWorkspaceSizeChanged(object? sender, EventArgs e)
+    {
+        if (DetailsArea is null || WorkspaceLayout.Width <= 0)
+            return;
+        var compact = WorkspaceLayout.Width < 750;
+        if (_compact == compact)
+            return;
+        _compact = compact;
+        _showCompactProfiles = false;
+        UpdateWorkspaceLayout();
+    }
+
+    private void OnToggleProfilesClicked(object? sender, EventArgs e)
+    {
+        _showCompactProfiles = !_showCompactProfiles;
+        UpdateWorkspaceLayout();
+        if (_showCompactProfiles)
+            ProfileSearch.Focus();
+    }
+
+    private void UpdateWorkspaceLayout()
+    {
+        ToggleProfilesButton.IsVisible = _compact;
+        ToggleProfilesButton.Text = _showCompactProfiles ? "К экземпляру" : "Профили";
+        WorkspaceLayout.ColumnDefinitions[0].Width = _compact ? new GridLength(1, GridUnitType.Star) : new GridLength(248);
+        WorkspaceLayout.ColumnDefinitions[1].Width = _compact ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
+        WorkspaceLayout.ColumnSpacing = _compact ? 0 : 12;
+        Grid.SetColumn(DetailsArea, _compact ? 0 : 1);
+        ProfilesCard.IsVisible = !_compact || _showCompactProfiles;
+        DetailsArea.IsVisible = !_compact || !_showCompactProfiles;
     }
 
     private void ShowSelectedProfile(ServerProfile? profile)
@@ -145,17 +210,19 @@ public partial class InstallationPage : ContentPage
         ProfileDetails.IsVisible = profile is not null;
         ProfileDetailsPlaceholder.IsVisible = profile is null;
         ProfileDetailsPlaceholder.Text = "Нет выбранного профиля.";
-        if (!string.Equals(_consoleProfile, profile?.Name, StringComparison.OrdinalIgnoreCase))
+        var changed = !string.Equals(_consoleProfile, profile?.Name, StringComparison.OrdinalIgnoreCase);
+        if (changed)
         {
             _consoleProfile = profile?.Name;
             ConsoleInput.Text = "";
             MaskConsoleInput.IsChecked = true;
             ConsoleOutput.Text = "";
+            _consoleTail = null;
             ConsoleMessage.IsVisible = false;
         }
         if (!string.Equals(_sandboxProfilePath, profile?.ConfigurationPath, StringComparison.OrdinalIgnoreCase))
             LoadSandbox(profile);
-        if (SettingsPane.IsVisible && _basicProfilePath != profile?.ConfigurationPath)
+        if (ProfilePane.IsVisible && _basicProfilePath != profile?.ConfigurationPath)
             LoadBasic(profile);
         if (ModsPane.IsVisible)
             RefreshProfileMods(profile);
@@ -163,6 +230,9 @@ public partial class InstallationPage : ContentPage
             return;
 
         ProfileNameLabel.Text = profile.Name;
+        if (changed)
+            LoadOverview(profile);
+        SelectedCover.Source = _profileRows.FirstOrDefault(row => row.Name == profile.Name)?.Cover;
         ProfileConfigurationLabel.Text = profile.ConfigurationPath;
         ProfileWorldLabel.Text = profile.WorldPath ?? "Папка мира ещё не найдена.";
         RefreshSessionStatus(profile);
@@ -224,6 +294,7 @@ public partial class InstallationPage : ContentPage
         {
             if (settings.Save(StarterKitBox.IsChecked, points, dayLength.Code))
             {
+                MarkSettingsSaved();
                 LoadSandbox(_profiles.Selected);
                 ShowSandboxMessage("Настройки сохранены и вступят в силу при следующем запуске. "
                     + "Если сервер уже работает, останови и запусти его вручную.");
@@ -253,39 +324,46 @@ public partial class InstallationPage : ContentPage
         public override string ToString() => Label;
     }
 
+    private ServerSessionStatus GetSessionStatus(ServerProfile profile) => _launching.Contains(profile.Name)
+        ? ServerSessionStatus.Starting : _launches.GetStatus(profile);
+
+    private ExternalServerStatus GetExternalStatus(ServerProfile profile) =>
+        _external?.GetStatus(profile.Name) ?? ExternalServerStatus.NotObserved;
+
+    private void RefreshStatuses()
+    {
+        foreach (var row in _profileRows)
+        {
+            var status = GetSessionStatus(row.Profile);
+            UpdatePendingSettings(row.Name, status);
+            row.Update(OverviewQueries.Describe(status, GetExternalStatus(row.Profile), _external?.Available != false));
+        }
+        if (ProfileDetails.IsVisible && _profiles.Selected is { } profile)
+            RefreshSessionStatus(profile);
+    }
+
     private void RefreshSessionStatus(ServerProfile profile)
     {
-        var status = _launching.Contains(profile.Name)
-            ? ServerSessionStatus.Starting
-            : _launches.GetStatus(profile);
-        var external = _external?.GetStatus(profile.Name) ?? ExternalServerStatus.NotObserved;
+        var status = GetSessionStatus(profile);
+        var external = GetExternalStatus(profile);
+        var presentation = OverviewQueries.Describe(status, external, _external?.Available != false);
+        UpdatePendingSettings(profile.Name, status);
+        _profileRows.FirstOrDefault(row => row.Name == profile.Name)?.Update(presentation);
         var ownActive = status is ServerSessionStatus.Starting or ServerSessionStatus.Running
             or ServerSessionStatus.Stopping or ServerSessionStatus.StopUnconfirmed;
-        SessionStatusLabel.Text = status switch
-        {
-            ServerSessionStatus.Starting => "Запускается. Готовность не подтверждена.",
-            ServerSessionStatus.Running => "Работает",
-            ServerSessionStatus.StartupFailed => "Запуск не удался: лаунчер завершился до подтверждения готовности.",
-            ServerSessionStatus.Ended => "Лаунчер завершился.",
-            ServerSessionStatus.Stopping => "Останавливается. Ожидаем завершения сервера.",
-            ServerSessionStatus.Stopped => "Остановлен",
-            ServerSessionStatus.StopUnconfirmed => "Не удалось подтвердить остановку. Проверь консоль сервера.",
-            _ => "Сеанс не отслеживается.",
-        };
-        if (!ownActive)
-        {
-            SessionStatusLabel.Text = external switch
-            {
-                ExternalServerStatus.ProcessObserved => "Процесс запущен, готовность не подтверждена (внешний сеанс).",
-                ExternalServerStatus.Ambiguous => "Внешний сеанс не определён однозначно: несколько процессов с этим именем.",
-                _ when status == ServerSessionStatus.NotObserved && _external is { Available: false }
-                    => "Не удалось проверить внешние сеансы.",
-                _ => SessionStatusLabel.Text,
-            };
-        }
+        SessionStatusLabel.Text = presentation.Detail;
+        SessionStatusLabel.SetAppThemeColor(Label.TextColorProperty,
+            ProfileRow.GetColor(presentation.Tone, false), ProfileRow.GetColor(presentation.Tone, true));
         StartServerButton.IsEnabled = !_closeInProgress && _savedInstallationFolder is not null
             && !ownActive && external == ExternalServerStatus.NotObserved;
         StopServerButton.IsEnabled = !_closeInProgress && status == ServerSessionStatus.Running;
+        StopHint.Text = _closeInProgress ? "Панель завершает работу." : presentation.StopHint;
+        StopHint.IsVisible = !StopServerButton.IsEnabled && !string.IsNullOrEmpty(StopHint.Text);
+        var pending = _pendingSettings.ContainsKey(profile.Name);
+        PendingSettingsLabel.IsVisible = pending;
+        PendingSettingsLabel.Text = "Изменения сохранены. Вступят в силу при следующем запуске.";
+        OverviewNotice.IsVisible = pending;
+        OverviewNotice.Text = PendingSettingsLabel.Text;
         LaunchMessageLabel.Text = _launchMessages.GetValueOrDefault(profile.Name)
             ?? (_savedInstallationFolder is null ? "Выбери папку Dedicated Server, чтобы запустить профиль." : "");
         LaunchMessageLabel.IsVisible = LaunchMessageLabel.Text.Length > 0;
@@ -293,34 +371,77 @@ public partial class InstallationPage : ContentPage
             && status is ServerSessionStatus.Starting or ServerSessionStatus.Running;
         ConsoleInput.IsEnabled = SendConsoleButton.IsEnabled = canSend;
         if (ConsolePane.IsVisible)
-        {
-            var tail = _launches.ReadConsole(profile);
-            if (!string.Equals(ConsoleOutput.Text, tail, StringComparison.Ordinal))
-                ConsoleOutput.Text = tail;
-        }
+            RefreshConsole(profile);
     }
 
+    private void OnShowOverviewClicked(object? sender, EventArgs e) => ShowPane(OverviewPane);
     private void OnShowProfileClicked(object? sender, EventArgs e) => ShowPane(ProfilePane);
-    private void OnShowSettingsClicked(object? sender, EventArgs e) => ShowPane(SettingsPane);
     private void OnShowModsClicked(object? sender, EventArgs e) => ShowPane(ModsPane);
     private void OnShowConsoleClicked(object? sender, EventArgs e) => ShowPane(ConsolePane);
 
     private void ShowPane(View pane)
     {
+        OverviewPane.IsVisible = pane == OverviewPane;
         ProfilePane.IsVisible = pane == ProfilePane;
-        SettingsPane.IsVisible = pane == SettingsPane;
         ModsPane.IsVisible = pane == ModsPane;
         ConsolePane.IsVisible = pane == ConsolePane;
-        ShowProfileButton.IsEnabled = !ProfilePane.IsVisible;
-        ShowSettingsButton.IsEnabled = !SettingsPane.IsVisible;
-        ShowModsButton.IsEnabled = !ModsPane.IsVisible;
-        ShowConsoleButton.IsEnabled = !ConsolePane.IsVisible;
+        DetailsScroll.IsVisible = !ConsolePane.IsVisible;
+        SetTab(ShowOverviewButton, OverviewPane.IsVisible);
+        SetTab(ShowProfileButton, ProfilePane.IsVisible);
+        SetTab(ShowModsButton, ModsPane.IsVisible);
+        SetTab(ShowConsoleButton, ConsolePane.IsVisible);
+        if (OverviewPane.IsVisible)
+            LoadOverview(_profiles.Selected);
         if (ModsPane.IsVisible)
             RefreshProfileMods(_profiles.Selected);
-        if (SettingsPane.IsVisible && _basicProfilePath != _profiles.Selected?.ConfigurationPath)
+        if (ProfilePane.IsVisible && _basicProfilePath != _profiles.Selected?.ConfigurationPath)
             LoadBasic(_profiles.Selected);
         if (_profiles.Selected is { } profile)
             RefreshSessionStatus(profile);
+    }
+
+    private static void SetTab(Button button, bool selected)
+    {
+        button.SetAppThemeColor(Button.BackgroundColorProperty,
+            Color.FromArgb(selected ? "#E5D7B8" : "#E6EADD"), Color.FromArgb(selected ? "#D7B773" : "#30382A"));
+        button.SetAppThemeColor(Button.TextColorProperty, Color.FromArgb("#262B21"),
+            Color.FromArgb(selected ? "#231D10" : "#EFEEE5"));
+        SemanticProperties.SetDescription(button, selected ? $"{button.Text}, текущая вкладка" : button.Text);
+    }
+
+    private void LoadOverview(ServerProfile? profile)
+    {
+        if (profile is null)
+            return;
+        BasicServerSettings? settings = null;
+        try { settings = BasicServerSettings.Open(profile); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidDataException) { }
+        OverviewLimit.Text = FormatSetting(settings?.MaxPlayers, 100);
+        OverviewPvp.Text = settings is null ? "Не определено" : settings.Pvp ? "Включено" : "Выключено";
+        OverviewPorts.Text = settings is null ? "Не определены"
+            : $"{FormatSetting(settings.DefaultPort, 65535)} / {FormatSetting(settings.UdpPort, 65535)}";
+
+        static string FormatSetting(string? value, int max) =>
+            int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var number) && number >= 1 && number <= max
+                ? number.ToString(CultureInfo.InvariantCulture) : "Не определено";
+    }
+
+    private void MarkSettingsSaved()
+    {
+        if (_profiles.Selected is not { } profile)
+            return;
+        _pendingSettings[profile.Name] = ++_settingsRevision;
+        LoadOverview(profile);
+        RefreshSessionStatus(profile);
+    }
+
+    private void UpdatePendingSettings(string name, ServerSessionStatus status)
+    {
+        if (status == ServerSessionStatus.Running && _settingsAtLaunch.Remove(name, out var revision)
+            && _pendingSettings.GetValueOrDefault(name) == revision)
+            _pendingSettings.Remove(name);
+        else if (status is not (ServerSessionStatus.Starting or ServerSessionStatus.Running))
+            _settingsAtLaunch.Remove(name);
     }
 
     private void OnReloadBasicClicked(object? sender, EventArgs e) => LoadBasic(_profiles.Selected);
@@ -364,9 +485,13 @@ public partial class InstallationPage : ContentPage
         }
         try
         {
-            ShowBasicMessage(settings.Save(maxPlayers, PvpBox.IsChecked, defaultPort, udpPort)
-                ? "Настройки сохранены. Они вступят в силу при следующем запуске."
-                : "Нет изменений для сохранения.");
+            if (settings.Save(maxPlayers, PvpBox.IsChecked, defaultPort, udpPort))
+            {
+                MarkSettingsSaved();
+                ShowBasicMessage("Настройки сохранены. Они вступят в силу при следующем запуске.");
+            }
+            else
+                ShowBasicMessage("Нет изменений для сохранения.");
         }
         catch (ProfileConfigurationConflictException error)
         {
@@ -395,13 +520,13 @@ public partial class InstallationPage : ContentPage
     private void RefreshProfileMods(ServerProfile? profile)
     {
         ModLists.IsVisible = ModsReadError.IsVisible = false;
+        _modSnapshot = null;
         if (profile is null)
             return;
         try
         {
-            var mods = ServerProfileMods.Read(profile);
-            ModIdsLabel.Text = FormatModIds(mods.ModIds);
-            WorkshopIdsLabel.Text = FormatModIds(mods.WorkshopIds);
+            _modSnapshot = ServerProfileMods.Read(profile);
+            ApplyModFilter();
             ModLists.IsVisible = true;
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidDataException)
@@ -413,8 +538,49 @@ public partial class InstallationPage : ContentPage
         }
     }
 
-    private static string FormatModIds(IReadOnlyList<string> ids) =>
-        ids.Count == 0 ? "Не указаны." : string.Join('\n', ids);
+    private void OnModSearchChanged(object? sender, TextChangedEventArgs e) => ApplyModFilter();
+
+    private void ApplyModFilter()
+    {
+        if (_modSnapshot is not { } mods)
+            return;
+        ModIdsLabel.Text = FormatModIds(mods.ModIds);
+        WorkshopIdsLabel.Text = FormatModIds(mods.WorkshopIds);
+
+        string FormatModIds(IReadOnlyList<string> ids)
+        {
+            if (ids.Count == 0)
+                return "Не указаны.";
+            var matches = ids.Where(id => OverviewQueries.Matches(id, ModSearch.Text)).ToArray();
+            return matches.Length == 0 ? "Нет совпадений." : string.Join('\n', matches);
+        }
+    }
+
+    private void OnConsoleSearchChanged(object? sender, TextChangedEventArgs e) => RenderConsole();
+    private void OnConsoleLevelChanged(object? sender, EventArgs e) => RenderConsole();
+
+    private void RefreshConsole(ServerProfile profile)
+    {
+        var tail = _launches.ReadConsole(profile);
+        if (string.Equals(_consoleTail, tail, StringComparison.Ordinal))
+            return;
+        _consoleTail = tail;
+        RenderConsole();
+    }
+
+    private void RenderConsole()
+    {
+        if (ConsoleOutput is null || ConsoleSearch is null || ConsoleLevelPicker is null)
+            return;
+        var tail = _consoleTail ?? "";
+        var level = Math.Max(0, ConsoleLevelPicker.SelectedIndex);
+        ConsoleOutput.Placeholder = tail.Length == 0
+            ? "Журнал появится после запуска сервера из панели."
+            : "Нет строк, соответствующих фильтрам.";
+        var filtered = OverviewQueries.FilterLog(tail, ConsoleSearch.Text, (ConsoleLogLevel)level);
+        if (!string.Equals(ConsoleOutput.Text, filtered, StringComparison.Ordinal))
+            ConsoleOutput.Text = filtered;
+    }
 
     private void OnMaskConsoleChanged(object? sender, CheckedChangedEventArgs e)
     {
@@ -424,7 +590,7 @@ public partial class InstallationPage : ContentPage
 
     private async void OnSendConsoleClicked(object? sender, EventArgs e)
     {
-        if (_closeInProgress || _sendingConsole || _profiles.Selected is not { } profile)
+        if (_closeInProgress || _sendingConsole || !ConsoleInput.IsEnabled || _profiles.Selected is not { } profile)
             return;
 
         var line = ConsoleInput.Text ?? "";
@@ -501,16 +667,19 @@ public partial class InstallationPage : ContentPage
         }
     }
 
-    private void OnStopServerClicked(object? sender, EventArgs e)
+    private async void OnStopServerClicked(object? sender, EventArgs e)
     {
         if (_closeInProgress || _profiles.Selected is not { } profile)
             return;
 
+        if (!await DisplayAlertAsync("Штатная остановка", $"Остановить сервер «{profile.Name}»? Игроки потеряют подключение.",
+                "Остановить", "Отмена") || _closeInProgress)
+            return;
         _launchMessages.Remove(profile.Name);
         var result = _launches.RequestStop(profile);
         if (result.Error is { } error)
             _launchMessages[profile.Name] = error;
-        RefreshSessionStatus(profile);
+        RefreshStatuses();
     }
 
     private async void OnStartServerClicked(object? sender, EventArgs e)
@@ -537,15 +706,21 @@ public partial class InstallationPage : ContentPage
                 _launchMessages[profile.Name] = "Внешний процесс уже запущен или не определяется однозначно. Второй запуск не выполнен.";
                 return;
             }
+            var revision = _pendingSettings.GetValueOrDefault(profile.Name);
             var result = await Task.Run(() => _launches.Start(installation, profile));
             if (!result.Started)
                 _launchMessages[profile.Name] = result.Message;
+            else
+            {
+                _settingsAtLaunch[profile.Name] = revision;
+                if (_consoleProfile == profile.Name)
+                    _consoleTail = null;
+            }
         }
         finally
         {
             _launching.Remove(profile.Name);
-            if (ProfileDetails.IsVisible)
-                ShowSelectedProfile(_profiles.Selected);
+            RefreshStatuses();
         }
     }
 
