@@ -295,10 +295,11 @@ if (OperatingSystem.IsWindows())
     Console.WriteLine("PASS: exact Windows network readiness output belongs only to the launcher that printed it");
 
     var stopProbeDirectory = Directory.CreateDirectory(Path.Combine(sandbox.Path, "Stop probe & spaces")).FullName;
-    var receivedCommand = Path.Combine(stopProbeDirectory, "command.txt");
-    var releaseStop = Path.Combine(stopProbeDirectory, "exit.flag");
+    string CommandPath(ServerProfile profile) => Path.Combine(stopProbeDirectory, $"{profile.Name}.command.txt");
+    string ReleasePath(ServerProfile profile) => Path.Combine(stopProbeDirectory, $"{profile.Name}.exit.flag");
     File.WriteAllText(Path.Combine(stopProbeDirectory, "StartServer64.bat"), ("""
         @echo off
+        set "PZ_TEST_PROFILE=%~2"
         "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File .\receive.ps1
         pause
         exit /b 0
@@ -308,38 +309,64 @@ if (OperatingSystem.IsWindows())
         Write-Output 'LOG  : Network      f:0 st:775,941,047> *** SERVER STARTED ****'
         $stream = [IO.StreamReader]::new([Console]::OpenStandardInput())
         $line = $stream.ReadLineAsync()
-        if (!$line.Wait(12000)) { exit 1 }
-        [IO.File]::WriteAllText((Join-Path $PWD 'command.txt'), [string]$line.Result)
+        if (!$line.Wait(25000)) { exit 1 }
+        $received = Join-Path $PWD "$env:PZ_TEST_PROFILE.command.txt"
+        [IO.File]::WriteAllText("$received.tmp", [string]$line.Result)
+        [IO.File]::Move("$received.tmp", $received)
+        $release = "$env:PZ_TEST_PROFILE.exit.flag"
         $until = [DateTime]::UtcNow.AddSeconds(10)
-        while (!(Test-Path -LiteralPath 'exit.flag') -and [DateTime]::UtcNow -lt $until) { Start-Sleep -Milliseconds 25 }
+        while (!(Test-Path -LiteralPath $release) -and [DateTime]::UtcNow -lt $until) { Start-Sleep -Milliseconds 25 }
         """);
-    Check(windowsSessions.Start(stopProbeDirectory, namedProfile).Started, "The Windows stop fixture should start.");
+    var concurrentSessions = new ServerLaunches();
+    Check(!concurrentSessions.RequestStop(alphaProfile).Accepted, "An unowned profile must not receive a stop request.");
     try
     {
-        timeout.Restart();
-        while (windowsSessions.GetStatus(namedProfile) == ServerSessionStatus.Starting
-            && timeout.Elapsed < TimeSpan.FromSeconds(10))
-            await Task.Delay(25);
-        Check(!windowsSessions.RequestStop(alphaProfile).Accepted && windowsSessions.RequestStop(namedProfile).Accepted,
-            "Only the session which owns the Windows relay can receive the stop request.");
-        timeout.Restart();
-        while (!File.Exists(receivedCommand) && timeout.Elapsed < TimeSpan.FromSeconds(10))
-            await Task.Delay(25);
-        Check(File.Exists(receivedCommand) && File.ReadAllText(receivedCommand) == "quit"
-            && windowsSessions.GetStatus(namedProfile) == ServerSessionStatus.Stopping,
-            "The exact quit command must reach the child's stdin without prematurely reporting it stopped.");
+        Check(concurrentSessions.Start(stopProbeDirectory, namedProfile).Started
+            && concurrentSessions.Start(stopProbeDirectory, alphaProfile).Started,
+            "Both profiles must launch from the same Windows installation.");
+        await WaitUntil(() => concurrentSessions.GetStatus(namedProfile) == ServerSessionStatus.Running
+            && concurrentSessions.GetStatus(alphaProfile) == ServerSessionStatus.Running,
+            "Both Windows sessions must reach readiness at the same time.");
+        Check(concurrentSessions.RequestStop(namedProfile).Accepted, "The selected Windows session should accept a stop.");
+        await WaitUntil(() => File.Exists(CommandPath(namedProfile)), "Quit did not reach the selected process.");
+        Check(File.ReadAllText(CommandPath(namedProfile)) == "quit"
+            && concurrentSessions.GetStatus(namedProfile) == ServerSessionStatus.Stopping
+            && concurrentSessions.GetStatus(alphaProfile) == ServerSessionStatus.Running
+            && !File.Exists(CommandPath(alphaProfile)),
+            "The exact quit command must reach only the selected child while both processes are still alive.");
+
+        File.WriteAllText(ReleasePath(namedProfile), "");
+        await WaitUntil(() => concurrentSessions.GetStatus(namedProfile) == ServerSessionStatus.Stopped,
+            "The selected launcher should exit even with a trailing PAUSE.");
+        Check(concurrentSessions.GetStatus(alphaProfile) == ServerSessionStatus.Running
+            && !File.Exists(CommandPath(alphaProfile)), "The other session must still run and not have received a command.");
+
+        Check(concurrentSessions.RequestStop(alphaProfile).Accepted, "The other session should still accept its own stop.");
+        await WaitUntil(() => File.Exists(CommandPath(alphaProfile)), "Quit did not reach the other process.");
+        Check(File.ReadAllText(CommandPath(alphaProfile)) == "quit", "The other process received an unexpected command.");
+        File.WriteAllText(ReleasePath(alphaProfile), "");
+        await WaitUntil(() => concurrentSessions.GetStatus(alphaProfile) == ServerSessionStatus.Stopped,
+            "The other launcher should exit after receiving its own quit.");
     }
     finally
     {
-        File.WriteAllText(releaseStop, "");
+        foreach (var profile in new[] { namedProfile, alphaProfile })
+        {
+            File.WriteAllText(ReleasePath(profile), "");
+            concurrentSessions.RequestStop(profile);
+        }
     }
-    timeout.Restart();
-    while (windowsSessions.GetStatus(namedProfile) == ServerSessionStatus.Stopping
-        && timeout.Elapsed < TimeSpan.FromSeconds(10))
+    Console.WriteLine("PASS: two Windows relays from one installation stop independently, even with PAUSE");
+}
+
+static async Task WaitUntil(Func<bool> condition, string message)
+{
+    var timeout = Stopwatch.StartNew();
+    while (!condition())
+    {
+        Check(timeout.Elapsed < TimeSpan.FromSeconds(10), message);
         await Task.Delay(25);
-    Check(windowsSessions.GetStatus(namedProfile) == ServerSessionStatus.Stopped,
-        "The relay must observe the cmd process exiting even when the batch has a trailing PAUSE.");
-    Console.WriteLine("PASS: Windows relay delivers quit and observes cmd exit after PAUSE");
+    }
 }
 
 static void Check(bool condition, string message)
