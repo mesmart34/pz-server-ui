@@ -6,11 +6,14 @@ namespace PzServerUi.Application;
 
 internal static class WindowsSessionLauncher
 {
-    // This helper lives in the server console, not in the MAUI process. cmd keeps its
-    // interactive input; the helper mirrors its output from a per-launch file.
+    // The helper owns an isolated console, the child's input, and the per-launch log.
+    // None of those handles belong to the MAUI process.
     private const string ConsoleRelay = """
         $ErrorActionPreference = 'Stop'
+        $ProgressPreference = 'SilentlyContinue'
         $log = $env:PZ_PANEL_SESSION_LOG
+        $quit = $env:PZ_PANEL_SESSION_QUIT
+        $exitSignal = $env:PZ_PANEL_SESSION_EXIT
         $child = $null
         $reader = $null
         try {
@@ -19,8 +22,12 @@ internal static class WindowsSessionLauncher
             $start.WorkingDirectory = $env:PZ_PANEL_INSTALL
             $start.Arguments = $env:PZ_PANEL_CMD_ARGS + ' > "%PZ_PANEL_SESSION_LOG%" 2>&1'
             $start.UseShellExecute = $false
+            $start.RedirectStandardInput = $true
             $child = [Diagnostics.Process]::Start($start)
             $buffer = New-Object char[] 4096
+            $inputLine = [Text.StringBuilder]::new()
+            $quitSent = $false
+            $quitDelivered = $false
             do {
                 $exited = $child.HasExited
                 try {
@@ -28,18 +35,50 @@ internal static class WindowsSessionLauncher
                         $stream = [IO.File]::Open($log, 'Open', 'Read', ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
                         $reader = [IO.StreamReader]::new($stream, [Console]::OutputEncoding)
                     }
-                    do {
+                    for ($chunk = 0; $chunk -lt 16; $chunk++) {
                         $count = $reader.Read($buffer, 0, $buffer.Length)
-                        if ($count -gt 0) { [Console]::Write($buffer, 0, $count) }
-                    } while ($count -gt 0)
+                        if ($count -eq 0) { break }
+                        [Console]::Write($buffer, 0, $count)
+                    }
                 } catch [IO.IOException] { }
+                if (!$exited -and !$quitSent) {
+                    if ([IO.File]::Exists($quit)) {
+                        $quitSent = $true
+                        try {
+                            $child.StandardInput.WriteLine('quit')
+                            $child.StandardInput.Flush()
+                            $quitDelivered = $true
+                        } catch [IO.IOException] { }
+                        # EOF also releases the batch file's optional trailing PAUSE.
+                        try { $child.StandardInput.Close() } catch [IO.IOException] { }
+                    } else {
+                        # Relay complete lines from our own console. Do not echo passwords.
+                        try {
+                            $keys = 0
+                            while ($keys -lt 100 -and ![Console]::IsInputRedirected -and [Console]::KeyAvailable) {
+                                $keys++
+                                $key = [Console]::ReadKey($true)
+                                if ($key.Key -eq [ConsoleKey]::Enter) {
+                                    $child.StandardInput.WriteLine($inputLine.ToString())
+                                    $null = $inputLine.Clear()
+                                } elseif ($key.Key -eq [ConsoleKey]::Backspace -and $inputLine.Length -gt 0) {
+                                    $inputLine.Length--
+                                } elseif (![char]::IsControl($key.KeyChar) -and $inputLine.Length -lt 4096) {
+                                    $null = $inputLine.Append($key.KeyChar)
+                                }
+                            }
+                        } catch [IO.IOException] { } catch [InvalidOperationException] { }
+                    }
+                }
                 if (!$exited) { Start-Sleep -Milliseconds 75 }
             } until ($exited)
+            if ($quitDelivered) { [IO.File]::WriteAllText($exitSignal, '') }
             exit $child.ExitCode
         } finally {
             if ($null -ne $reader) { $reader.Dispose() }
             if ($null -ne $child) { $child.Dispose() }
             Remove-Item -LiteralPath $log -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $quit -ErrorAction SilentlyContinue
         }
         """;
 
@@ -54,6 +93,8 @@ internal static class WindowsSessionLauncher
         var sessionDirectory = Path.Combine(appData, "PzServerUi", "sessions");
         Directory.CreateDirectory(sessionDirectory);
         var log = Path.Combine(sessionDirectory, $"{Guid.NewGuid():N}.log");
+        var quit = Path.ChangeExtension(log, ".quit");
+        var exitSignal = Path.ChangeExtension(log, ".exited");
         using (File.Open(log, FileMode.CreateNew, FileAccess.Write, FileShare.Read))
         {
         }
@@ -70,12 +111,14 @@ internal static class WindowsSessionLauncher
                          Convert.ToBase64String(Encoding.Unicode.GetBytes(ConsoleRelay)) })
                 helper.ArgumentList.Add(arg);
             helper.Environment["PZ_PANEL_SESSION_LOG"] = log;
+            helper.Environment["PZ_PANEL_SESSION_QUIT"] = quit;
+            helper.Environment["PZ_PANEL_SESSION_EXIT"] = exitSignal;
             helper.Environment["PZ_PANEL_CMD"] = launcher.FileName;
             helper.Environment["PZ_PANEL_INSTALL"] = launcher.WorkingDirectory;
             helper.Environment["PZ_PANEL_CMD_ARGS"] = launcher.Arguments;
 
-            var process = Process.Start(helper) ?? throw new InvalidOperationException("Процесс запуска не создан.");
-            return new WindowsLaunchProcess(process, new ReadinessLog(log));
+            var process = WindowsConsoleProcess.Start(helper);
+            return new WindowsLaunchProcess(process, new ReadinessLog(log), quit, exitSignal);
         }
         catch
         {
@@ -85,11 +128,28 @@ internal static class WindowsSessionLauncher
         }
     }
 
-    private sealed class WindowsLaunchProcess(Process process, ReadinessLog log) : IServerLaunchProcess
+    private sealed class WindowsLaunchProcess(Process process, ReadinessLog log, string quit, string exitSignal)
+        : IServerLaunchProcess
     {
         public bool HasExited => process.HasExited;
+        public bool ExitConfirmed => File.Exists(exitSignal);
         public bool ReadinessConfirmed => log.HasMarker();
-        public void Dispose() => process.Dispose();
+        public void RequestGracefulStop()
+        {
+            if (process.HasExited)
+                throw new InvalidOperationException("Лаунчер уже завершился.");
+            using var request = File.Open(quit, FileMode.CreateNew, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
+        }
+
+        public void Dispose()
+        {
+            process.Dispose();
+            foreach (var path in new[] { quit, exitSignal })
+            {
+                try { File.Delete(path); }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+            }
+        }
     }
 
     private sealed class ReadinessLog(string path)

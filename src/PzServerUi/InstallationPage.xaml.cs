@@ -106,13 +106,30 @@ public partial class InstallationPage : ContentPage
             ServerSessionStatus.Running => "Работает",
             ServerSessionStatus.StartupFailed => "Запуск не удался: лаунчер завершился до подтверждения готовности.",
             ServerSessionStatus.Ended => "Лаунчер завершился.",
+            ServerSessionStatus.Stopping => "Останавливается. Ожидаем завершения сервера.",
+            ServerSessionStatus.Stopped => "Остановлен",
+            ServerSessionStatus.StopUnconfirmed => "Не удалось подтвердить остановку. Проверь консоль сервера.",
             _ => "Сеанс не отслеживается.",
         };
         StartServerButton.IsEnabled = _savedInstallationFolder is not null
-            && status is not (ServerSessionStatus.Starting or ServerSessionStatus.Running);
+            && status is not (ServerSessionStatus.Starting or ServerSessionStatus.Running
+                or ServerSessionStatus.Stopping or ServerSessionStatus.StopUnconfirmed);
+        StopServerButton.IsEnabled = status == ServerSessionStatus.Running;
         LaunchMessageLabel.Text = _launchMessages.GetValueOrDefault(profile.Name)
             ?? (_savedInstallationFolder is null ? "Выбери папку Dedicated Server, чтобы запустить профиль." : "");
         LaunchMessageLabel.IsVisible = LaunchMessageLabel.Text.Length > 0;
+    }
+
+    private void OnStopServerClicked(object? sender, EventArgs e)
+    {
+        if (_profiles.Selected is not { } profile)
+            return;
+
+        _launchMessages.Remove(profile.Name);
+        var result = _launches.RequestStop(profile);
+        if (result.Error is { } error)
+            _launchMessages[profile.Name] = error;
+        RefreshSessionStatus(profile);
     }
 
     private async void OnStartServerClicked(object? sender, EventArgs e)

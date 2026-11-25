@@ -71,8 +71,10 @@
                             <Label Text="Папка мира" FontAttributes="Bold" />
                             <Label x:Name="ProfileWorldLabel" LineBreakMode="CharacterWrap" />
                             <Label x:Name="SessionStatusLabel" FontAttributes="Bold" LineBreakMode="WordWrap" />
-                            <Button x:Name="StartServerButton" Text="Запустить" HorizontalOptions="Start"
-                                    Clicked="OnStartServerClicked" />
+                            <HorizontalStackLayout Spacing="8">
+                                <Button x:Name="StartServerButton" Text="Запустить" Clicked="OnStartServerClicked" />
+                                <Button x:Name="StopServerButton" Text="Остановить" Clicked="OnStopServerClicked" />
+                            </HorizontalStackLayout>
                             <Label x:Name="LaunchMessageLabel" IsVisible="False" LineBreakMode="WordWrap" />
                         </VerticalStackLayout>
                     </VerticalStackLayout>
