@@ -37,7 +37,7 @@ public sealed class ServerLaunches(Func<ProcessStartInfo, IServerLaunchProcess> 
     private readonly object _gate = new();
     private readonly Dictionary<string, Session> _sessions = new(StringComparer.OrdinalIgnoreCase);
 
-    public ServerLaunches() : this(StartWindowsProcess) { }
+    public ServerLaunches() : this(WindowsSessionLauncher.Start) { }
 
     public ServerSessionStatus GetStatus(ServerProfile profile)
     {
@@ -147,18 +147,6 @@ public sealed class ServerLaunches(Func<ProcessStartInfo, IServerLaunchProcess> 
     }
 
     private static ServerLaunchResult Reject(string message) => new(false, message);
-
-    private static IServerLaunchProcess StartWindowsProcess(ProcessStartInfo request) =>
-        new WindowsLaunchProcess(Process.Start(request) ?? throw new InvalidOperationException("Процесс запуска не создан."));
-
-    private sealed class WindowsLaunchProcess(Process process) : IServerLaunchProcess
-    {
-        public bool HasExited => process.HasExited;
-        // A live cmd process is not evidence that its server is accepting connections.
-        // Keep this false until the Windows launcher can identify a signal from this exact session.
-        public bool ReadinessConfirmed => false;
-        public void Dispose() => process.Dispose();
-    }
 
     private sealed class Session(IServerLaunchProcess process)
     {

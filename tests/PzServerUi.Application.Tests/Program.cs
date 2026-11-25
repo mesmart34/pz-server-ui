@@ -224,6 +224,47 @@ if (OperatingSystem.IsWindows())
     Check(windowsSessions.GetStatus(namedProfile) == ServerSessionStatus.StartupFailed,
         "A real cmd exit must be reported as failed startup without ever declaring readiness.");
     Console.WriteLine("PASS: Windows launcher exit is reported without starting a game process");
+
+    var readyProbeDirectory = Directory.CreateDirectory(Path.Combine(sandbox.Path, "Readiness probe & spaces")).FullName;
+    var generalFile = Path.Combine(readyProbeDirectory, "general.flag");
+    var releaseFile = Path.Combine(readyProbeDirectory, "release.flag");
+    File.WriteAllText(Path.Combine(readyProbeDirectory, "StartServer64.bat"), ("""
+        @echo off
+        echo LOG  : General      f:0 st:775,941,047^> *** SERVER STARTED ****
+        type nul >general.flag
+        "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -Command "$until=[DateTime]::UtcNow.AddSeconds(15); while (!(Test-Path -LiteralPath 'emit.flag') -and [DateTime]::UtcNow -lt $until) { Start-Sleep -Milliseconds 30 }"
+        echo LOG  : Network      f:0 st:775,941,047^> *** SERVER STARTED ****
+        "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -Command "$until=[DateTime]::UtcNow.AddSeconds(15); while (!(Test-Path -LiteralPath 'release.flag') -and [DateTime]::UtcNow -lt $until) { Start-Sleep -Milliseconds 30 }"
+        exit /b 0
+
+        """ + forwardingScript).ReplaceLineEndings("\r\n"));
+    Check(windowsSessions.Start(readyProbeDirectory, namedProfile).Started, "The Windows readiness fixture should start.");
+    try
+    {
+        timeout.Restart();
+        while (!File.Exists(generalFile) && timeout.Elapsed < TimeSpan.FromSeconds(10))
+            await Task.Delay(25);
+        Check(File.Exists(generalFile) && windowsSessions.GetStatus(namedProfile) == ServerSessionStatus.Starting,
+            "An output line that only resembles the network readiness signal must not mark the session running.");
+        File.WriteAllText(Path.Combine(readyProbeDirectory, "emit.flag"), "");
+        timeout.Restart();
+        while (windowsSessions.GetStatus(namedProfile) == ServerSessionStatus.Starting
+            && timeout.Elapsed < TimeSpan.FromSeconds(10))
+            await Task.Delay(25);
+        Check(windowsSessions.GetStatus(namedProfile) == ServerSessionStatus.Running
+            && windowsSessions.GetStatus(alphaProfile) == ServerSessionStatus.NotObserved,
+            "The exact Network log signal must mark only the launcher that actually printed it as running.");
+    }
+    finally
+    {
+        File.WriteAllText(Path.Combine(readyProbeDirectory, "emit.flag"), "");
+        File.WriteAllText(releaseFile, "");
+        timeout.Restart();
+        while (windowsSessions.GetStatus(namedProfile) is ServerSessionStatus.Starting or ServerSessionStatus.Running
+            && timeout.Elapsed < TimeSpan.FromSeconds(10))
+            await Task.Delay(25);
+    }
+    Console.WriteLine("PASS: exact Windows network readiness output belongs only to the launcher that printed it");
 }
 
 static void Check(bool condition, string message)
