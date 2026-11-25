@@ -70,6 +70,7 @@
                             <Label x:Name="ProfileConfigurationLabel" LineBreakMode="CharacterWrap" />
                             <Label Text="Папка мира" FontAttributes="Bold" />
                             <Label x:Name="ProfileWorldLabel" LineBreakMode="CharacterWrap" />
+                            <Label x:Name="SessionStatusLabel" FontAttributes="Bold" LineBreakMode="WordWrap" />
                             <Button x:Name="StartServerButton" Text="Запустить" HorizontalOptions="Start"
                                     Clicked="OnStartServerClicked" />
                             <Label x:Name="LaunchMessageLabel" IsVisible="False" LineBreakMode="WordWrap" />

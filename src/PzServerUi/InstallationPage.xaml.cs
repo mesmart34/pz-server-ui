@@ -33,6 +33,15 @@ public partial class InstallationPage : ContentPage
         }
 
         RefreshProfiles();
+        var statusTimer = Dispatcher.CreateTimer();
+        statusTimer.Interval = TimeSpan.FromSeconds(1);
+        statusTimer.Tick += (_, _) =>
+        {
+            if (ProfileDetails.IsVisible && _profiles.Selected is { } profile)
+                RefreshSessionStatus(profile);
+        };
+        Loaded += (_, _) => statusTimer.Start();
+        Unloaded += (_, _) => statusTimer.Stop();
     }
 
     private void OnRefreshProfilesClicked(object? sender, EventArgs e) => RefreshProfiles();
@@ -83,9 +92,25 @@ public partial class InstallationPage : ContentPage
         ProfileNameLabel.Text = profile.Name;
         ProfileConfigurationLabel.Text = profile.ConfigurationPath;
         ProfileWorldLabel.Text = profile.WorldPath ?? "Папка мира ещё не найдена.";
-        var launching = _launching.Contains(profile.Name);
-        StartServerButton.IsEnabled = !launching && _savedInstallationFolder is not null;
-        LaunchMessageLabel.Text = launching ? "Запускается…" : _launchMessages.GetValueOrDefault(profile.Name)
+        RefreshSessionStatus(profile);
+    }
+
+    private void RefreshSessionStatus(ServerProfile profile)
+    {
+        var status = _launching.Contains(profile.Name)
+            ? ServerSessionStatus.Starting
+            : _launches.GetStatus(profile);
+        SessionStatusLabel.Text = status switch
+        {
+            ServerSessionStatus.Starting => "Запускается. Готовность не подтверждена.",
+            ServerSessionStatus.Running => "Работает",
+            ServerSessionStatus.StartupFailed => "Запуск не удался: лаунчер завершился до подтверждения готовности.",
+            ServerSessionStatus.Ended => "Лаунчер завершился.",
+            _ => "Сеанс не отслеживается.",
+        };
+        StartServerButton.IsEnabled = _savedInstallationFolder is not null
+            && status is not (ServerSessionStatus.Starting or ServerSessionStatus.Running);
+        LaunchMessageLabel.Text = _launchMessages.GetValueOrDefault(profile.Name)
             ?? (_savedInstallationFolder is null ? "Выбери папку Dedicated Server, чтобы запустить профиль." : "");
         LaunchMessageLabel.IsVisible = LaunchMessageLabel.Text.Length > 0;
     }
@@ -97,11 +122,13 @@ public partial class InstallationPage : ContentPage
         if (profile is null || installation is null || !_launching.Add(profile.Name))
             return;
 
+        _launchMessages.Remove(profile.Name);
         ShowSelectedProfile(profile);
         try
         {
             var result = await Task.Run(() => _launches.Start(installation, profile));
-            _launchMessages[profile.Name] = result.Message;
+            if (!result.Started)
+                _launchMessages[profile.Name] = result.Message;
         }
         finally
         {
