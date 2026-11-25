@@ -53,6 +53,46 @@ if (OperatingSystem.IsWindows())
     Console.WriteLine("PASS: a locked settings file preserves the previous installation");
 }
 
+var data = Path.Combine(sandbox.Path, "Zomboid");
+var profiles = new ServerProfiles(data);
+profiles.Refresh();
+Check(profiles.Items.Count == 0 && profiles.Selected is null, "Missing data should show an empty list.");
+Check(!Directory.Exists(data), "Discovery must not create the game's data folder.");
+
+var configDirectory = Directory.CreateDirectory(Path.Combine(data, "Server")).FullName;
+profiles.Refresh();
+Check(profiles.Items.Count == 0 && profiles.Selected is null, "An empty Server folder should show an empty list.");
+
+var alphaConfig = Path.Combine(configDirectory, "alpha.ini");
+var bravoConfig = Path.Combine(configDirectory, "bravo.INI");
+File.WriteAllText(alphaConfig, "PublicName=Alpha\n");
+File.WriteAllText(bravoConfig, "PublicName=Bravo\n");
+File.WriteAllText(Path.Combine(configDirectory, "orphan_SandboxVars.lua"), "");
+var world = Directory.CreateDirectory(Path.Combine(data, "Saves", "Multiplayer", "alpha")).FullName;
+var worldFile = Path.Combine(world, "map.bin");
+File.WriteAllText(worldFile, "world");
+var beforeScan = Directory.EnumerateFileSystemEntries(data, "*", SearchOption.AllDirectories).Order().ToArray();
+
+profiles.Refresh();
+Check(profiles.Items.Select(profile => profile.Name).SequenceEqual(new[] { "alpha", "bravo" }),
+    "All named INI profiles should appear in name order, even without a world.");
+Check(profiles.Selected is { Name: "alpha" } && profiles.Selected.WorldPath == world,
+    "On opening the panel, details should show the first profile and its existing world.");
+profiles.Select("bravo");
+Check(profiles.Selected is { Name: "bravo", WorldPath: null } && profiles.Selected.ConfigurationPath == bravoConfig,
+    "Selecting another profile must change the details to that profile, without requiring a world.");
+profiles.Refresh();
+Check(profiles.Selected?.Name == "bravo", "Refreshing should preserve an existing selection.");
+Check(Directory.EnumerateFileSystemEntries(data, "*", SearchOption.AllDirectories).Order().SequenceEqual(beforeScan)
+    && File.ReadAllText(alphaConfig) == "PublicName=Alpha\n"
+    && File.ReadAllText(bravoConfig) == "PublicName=Bravo\n"
+    && File.ReadAllText(worldFile) == "world", "Discovery and selection must not modify configs or worlds.");
+
+File.Delete(bravoConfig);
+profiles.Refresh();
+Check(profiles.Selected?.Name == "alpha", "Refreshing after the selected profile is removed must not keep stale details.");
+Console.WriteLine("PASS: discovers named profiles without modifying data and keeps details in sync with selection");
+
 static void Check(bool condition, string message)
 {
     if (!condition)
