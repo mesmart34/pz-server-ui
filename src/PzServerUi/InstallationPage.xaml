@@ -82,41 +82,19 @@
         </Style>
     </ContentPage.Resources>
     <Grid RowDefinitions="Auto,*">
-        <Grid RowDefinitions="Auto,1,Auto,Auto" BackgroundColor="#191B16">
-            <Grid x:Name="HeaderLayout" ColumnDefinitions="248,*" MinimumHeightRequest="68">
-                <Grid Padding="20,8" ColumnDefinitions="38,*" ColumnSpacing="11" VerticalOptions="Center">
-                    <Border Stroke="#494231" BackgroundColor="#2B281E" StrokeShape="RoundRectangle 9"
-                            WidthRequest="38" HeightRequest="38">
-                        <Image Source="design_server.png" Style="{StaticResource InlineIcon}" WidthRequest="19" HeightRequest="19"
-                               HorizontalOptions="Center" />
-                    </Border>
-                    <VerticalStackLayout Grid.Column="1" Spacing="2" VerticalOptions="Center">
-                        <Label Text="PZ Server UI" FontAttributes="Bold" FontSize="16" SemanticProperties.HeadingLevel="Level1" />
-                        <Label Text="PROJECT ZOMBOID" FontFamily="Consolas" FontSize="10" CharacterSpacing="1.1"
-                               Style="{StaticResource Muted}" LineBreakMode="TailTruncation" />
-                    </VerticalStackLayout>
-                </Grid>
-                <Grid Grid.Column="1" ColumnDefinitions="1,*,Auto">
-                    <BoxView x:Name="HeaderDivider" Color="#30352A" />
-                    <Label x:Name="HeaderTitle" Grid.Column="1" Text="Обзор сервера" Margin="26,0" FontSize="14"
-                           VerticalOptions="Center" Style="{StaticResource Muted}" />
-                    <HorizontalStackLayout Grid.Column="2" Margin="0,0,16,0" Spacing="6" VerticalOptions="Center">
-                        <HorizontalStackLayout x:Name="LocalModeLabel" Spacing="7" Margin="0,0,9,0" VerticalOptions="Center">
-                            <BoxView WidthRequest="7" HeightRequest="7" CornerRadius="4" Color="#A9C18E" VerticalOptions="Center" />
-                            <Label Text="Локальный режим" Style="{StaticResource MetricLabel}" />
-                        </HorizontalStackLayout>
-                        <Button x:Name="ToggleProfilesButton" Text="Профили" IsVisible="False"
-                                Style="{StaticResource Action}" Clicked="OnToggleProfilesClicked" />
-                        <Button x:Name="CompactChooseFolderButton" Text="Установка" ImageSource="design_folder.png" ContentLayout="Left,6"
-                                IsVisible="False" Style="{StaticResource Action}" Clicked="OnChooseFolderClicked"
-                                SemanticProperties.Description="Выбрать папку Dedicated Server" />
-                    </HorizontalStackLayout>
-                </Grid>
-            </Grid>
-            <BoxView Grid.Row="1" Color="#30352A" />
-            <Label Grid.Row="2" x:Name="CompactFolderPath" IsVisible="False" Margin="13,5"
-                   FontSize="11" Style="{StaticResource Muted}" LineBreakMode="TailTruncation" />
-            <Label Grid.Row="3" x:Name="MessageLabel" IsVisible="False" Margin="14,6" LineBreakMode="WordWrap" />
+        <Grid RowDefinitions="1,Auto,Auto" BackgroundColor="#191B16">
+            <BoxView Color="#30352A" />
+            <VerticalStackLayout Grid.Row="1" x:Name="CompactToolbar" IsVisible="False" Padding="13,7,13,5" Spacing="4">
+                <HorizontalStackLayout Spacing="6">
+                    <Button x:Name="ToggleProfilesButton" Text="Профили" Style="{StaticResource Action}"
+                            Clicked="OnToggleProfilesClicked" />
+                    <Button x:Name="CompactChooseFolderButton" Text="Установка" ImageSource="design_folder.png"
+                            ContentLayout="Left,6" Style="{StaticResource Action}" Clicked="OnChooseFolderClicked"
+                            SemanticProperties.Description="Выбрать папку Dedicated Server" />
+                </HorizontalStackLayout>
+                <Label x:Name="CompactFolderPath" FontSize="11" Style="{StaticResource Muted}" LineBreakMode="TailTruncation" />
+            </VerticalStackLayout>
+            <Label Grid.Row="2" x:Name="MessageLabel" IsVisible="False" Margin="14,6" LineBreakMode="WordWrap" />
         </Grid>
         <Grid Grid.Row="1" x:Name="WorkspaceLayout" ColumnDefinitions="248,*" SizeChanged="OnWorkspaceSizeChanged">
             <Grid x:Name="ProfilesCard" BackgroundColor="#191C16" ColumnDefinitions="*,1">

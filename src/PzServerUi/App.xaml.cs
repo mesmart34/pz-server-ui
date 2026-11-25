@@ -11,6 +11,5 @@ public partial class App : Microsoft.Maui.Controls.Application
         UserAppTheme = AppTheme.Dark;
     }
 
-    protected override Window CreateWindow(IActivationState? activationState) =>
-        new(new InstallationPage()) { Title = "PZ Server UI" };
+    protected override Window CreateWindow(IActivationState? activationState) => new ServerWindow();
 }

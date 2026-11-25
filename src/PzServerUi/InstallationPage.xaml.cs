@@ -200,12 +200,10 @@ public partial class InstallationPage : ContentPage
         var sidebar = width < 900 ? 205 : 248;
         var narrow = _compact || width - sidebar < 650;
         var shortWindow = WorkspaceLayout.Height < 550;
-        ToggleProfilesButton.IsVisible = _compact;
+        CompactToolbar.IsVisible = _compact;
         ToggleProfilesButton.Text = _showCompactProfiles ? "К экземпляру" : "Профили";
-        CompactChooseFolderButton.IsVisible = CompactFolderPath.IsVisible = _compact;
-        HeaderDivider.IsVisible = HeaderTitle.IsVisible = LocalModeLabel.IsVisible = !_compact;
-        HeaderLayout.ColumnDefinitions[0].Width = _compact ? GridLength.Star : new GridLength(sidebar);
-        HeaderLayout.ColumnDefinitions[1].Width = _compact ? GridLength.Auto : GridLength.Star;
+        if (Window is ServerWindow serverWindow)
+            serverWindow.SetCompactTitleBar(_compact);
         WorkspaceLayout.ColumnDefinitions[0].Width = _compact ? GridLength.Star : new GridLength(sidebar);
         WorkspaceLayout.ColumnDefinitions[1].Width = _compact ? new GridLength(0) : GridLength.Star;
         Grid.SetColumn(DetailsArea, _compact ? 0 : 1);
