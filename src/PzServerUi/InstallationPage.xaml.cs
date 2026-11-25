@@ -38,8 +38,6 @@ public partial class InstallationPage : ContentPage
     private bool _canClose;
     private string? _sandboxProfilePath;
     private SandboxSettings? _sandboxSettings;
-    private string? _basicProfilePath;
-    private BasicServerSettings? _basicSettings;
     private Microsoft.UI.Xaml.Window? _nativeWindow;
 
     public InstallationPage()
@@ -260,8 +258,8 @@ public partial class InstallationPage : ContentPage
         }
         if (!string.Equals(_sandboxProfilePath, profile?.ConfigurationPath, StringComparison.OrdinalIgnoreCase))
             LoadSandbox(profile);
-        if (ProfilePane.IsVisible && _basicProfilePath != profile?.ConfigurationPath)
-            LoadBasic(profile);
+        if (ProfilePane.IsVisible && _iniProfilePath != profile?.ConfigurationPath)
+            LoadIni(profile);
         if (ModsPane.IsVisible)
             RefreshProfileMods(profile);
         if (profile is null)
@@ -483,8 +481,8 @@ public partial class InstallationPage : ContentPage
             LoadOverview(_profiles.Selected);
         if (ModsPane.IsVisible)
             RefreshProfileMods(_profiles.Selected);
-        if (ProfilePane.IsVisible && _basicProfilePath != _profiles.Selected?.ConfigurationPath)
-            LoadBasic(_profiles.Selected);
+        if (ProfilePane.IsVisible && _iniProfilePath != _profiles.Selected?.ConfigurationPath)
+            LoadIni(_profiles.Selected);
         if (_profiles.Selected is { } profile)
             RefreshSessionStatus(profile);
     }
@@ -535,79 +533,6 @@ public partial class InstallationPage : ContentPage
             _pendingSettings.Remove(name);
         else if (status is not (ServerSessionStatus.Starting or ServerSessionStatus.Running))
             _settingsAtLaunch.Remove(name);
-    }
-
-    private void OnReloadBasicClicked(object? sender, EventArgs e) => LoadBasic(_profiles.Selected);
-
-    private void LoadBasic(ServerProfile? profile)
-    {
-        _basicProfilePath = profile?.ConfigurationPath;
-        _basicSettings = null;
-        BasicFields.IsVisible = SaveBasicButton.IsEnabled = BasicMessage.IsVisible = false;
-        if (profile is null)
-            return;
-        try
-        {
-            var settings = BasicServerSettings.Open(profile);
-            MaxPlayersEntry.Text = settings.MaxPlayers;
-            PvpBox.IsChecked = settings.Pvp;
-            DefaultPortEntry.Text = settings.DefaultPort;
-            UdpPortEntry.Text = settings.UdpPort;
-            _basicSettings = settings;
-            BasicFields.IsVisible = SaveBasicButton.IsEnabled = true;
-        }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidDataException)
-        {
-            ShowBasicMessage($"Не удалось прочитать INI. {error.Message}");
-        }
-    }
-
-    private void OnSaveBasicClicked(object? sender, EventArgs e)
-    {
-        if (_basicSettings is not { } settings || _basicProfilePath != _profiles.Selected?.ConfigurationPath)
-            return;
-        if (!TryReadNumber(MaxPlayersEntry, out var maxPlayers))
-        {
-            ShowBasicMessage("Введи целое число для лимита игроков (от 1 до 100).");
-            return;
-        }
-        if (!TryReadNumber(DefaultPortEntry, out var defaultPort) || !TryReadNumber(UdpPortEntry, out var udpPort))
-        {
-            ShowBasicMessage("Введи целые числа для игровых портов (от 1 до 65535).");
-            return;
-        }
-        try
-        {
-            if (settings.Save(maxPlayers, PvpBox.IsChecked, defaultPort, udpPort))
-            {
-                MarkSettingsSaved();
-                ShowBasicMessage("Настройки сохранены. Они вступят в силу при следующем запуске.");
-            }
-            else
-                ShowBasicMessage("Нет изменений для сохранения.");
-        }
-        catch (ProfileConfigurationConflictException error)
-        {
-            SaveBasicButton.IsEnabled = false;
-            ShowBasicMessage(error.Message);
-        }
-        catch (ArgumentException error)
-        {
-            ShowBasicMessage(error.Message);
-        }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidDataException)
-        {
-            ShowBasicMessage($"Не удалось сохранить INI. {error.Message}");
-        }
-
-        static bool TryReadNumber(Entry entry, out int value) =>
-            int.TryParse(entry.Text?.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out value);
-    }
-
-    private void ShowBasicMessage(string message)
-    {
-        BasicMessage.Text = message;
-        BasicMessage.IsVisible = true;
     }
 
     private void RefreshProfileMods(ServerProfile? profile)

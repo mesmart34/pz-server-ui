@@ -374,33 +374,24 @@
                                          Color="{AppThemeBinding Light=#CFD4C3, Dark=#34392E}" />
                                 <HorizontalStackLayout Spacing="8">
                                     <Image Source="design_sliders.png" Style="{StaticResource InlineIcon}" />
-                                    <Label Text="Основные настройки" Style="{StaticResource SectionTitle}"
+                                    <Label Text="Настройки сервера (INI)" Style="{StaticResource SectionTitle}"
                                            SemanticProperties.HeadingLevel="Level2" />
                                 </HorizontalStackLayout>
                                 <Label Text="Изменения применяются при следующем запуске. Сохранение не перезапускает сервер."
                                        LineBreakMode="WordWrap" />
-                                <VerticalStackLayout x:Name="BasicFields" IsVisible="False" Spacing="5">
-                                    <Label Text="Лимит игроков (от 1 до 100)" />
-                                    <Entry x:Name="MaxPlayersEntry" Keyboard="Numeric"
-                                           SemanticProperties.Description="Лимит игроков" />
-                                    <HorizontalStackLayout Spacing="4">
-                                        <CheckBox x:Name="PvpBox" SemanticProperties.Description="Разрешить PvP" />
-                                        <Label Text="Разрешить PvP" VerticalOptions="Center" />
-                                    </HorizontalStackLayout>
-                                    <Label Text="Основной UDP-порт (DefaultPort)" />
-                                    <Entry x:Name="DefaultPortEntry" Keyboard="Numeric"
-                                           SemanticProperties.Description="Основной UDP-порт" />
-                                    <Label Text="Дополнительный UDP-порт (UDPPort)" />
-                                    <Entry x:Name="UdpPortEntry" Keyboard="Numeric"
-                                           SemanticProperties.Description="Дополнительный UDP-порт" />
-                                    <Label Text="Укажи два разных порта от 1 до 65535." LineBreakMode="WordWrap" />
+                                <VerticalStackLayout x:Name="IniFilters" IsVisible="False" Spacing="5">
+                                    <Picker x:Name="IniGroupPicker" Title="Группа параметров" SelectedIndexChanged="OnIniFilterChanged"
+                                            SemanticProperties.Description="Группа параметров INI" />
+                                    <Entry x:Name="IniSearch" Placeholder="Поиск по названию, ключу или группе" TextChanged="OnIniFilterChanged"
+                                           SemanticProperties.Description="Поиск по параметрам INI" />
                                 </VerticalStackLayout>
                                 <FlexLayout Wrap="Wrap">
-                                    <Button x:Name="SaveBasicButton" Text="Сохранить настройки" IsEnabled="False"
-                                            Margin="0,0,8,4" Clicked="OnSaveBasicClicked" />
-                                    <Button Text="Перечитать INI" Margin="0,0,0,4" Clicked="OnReloadBasicClicked" />
+                                    <Button x:Name="SaveIniButton" Text="Сохранить настройки" IsEnabled="False"
+                                            Margin="0,0,8,4" Clicked="OnSaveIniClicked" />
+                                    <Button Text="Перечитать INI" Margin="0,0,0,4" Clicked="OnReloadIniClicked" />
                                 </FlexLayout>
-                                <Label x:Name="BasicMessage" IsVisible="False" LineBreakMode="WordWrap" />
+                                <Label x:Name="IniMessage" IsVisible="False" LineBreakMode="WordWrap" />
+                                <VerticalStackLayout x:Name="IniFields" Spacing="8" />
                             </VerticalStackLayout>
                             <VerticalStackLayout x:Name="ModsPane" IsVisible="False" Spacing="8">
                                 <HorizontalStackLayout Spacing="8">

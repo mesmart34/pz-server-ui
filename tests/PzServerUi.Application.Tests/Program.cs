@@ -179,6 +179,50 @@ Check(File.ReadAllText(basicIni).EndsWith("# changed outside the panel", StringC
 Check(BasicServerSettings.Open(basicProfile).Save(40, true, 16361, 16362), "Save succeeds after an explicit reload.");
 Console.WriteLine("PASS: basic settings edit only requested INI fields, validate ports, and reject stale edits");
 
+var advancedPath = Path.Combine(modProfiles.ConfigurationDirectory, "advanced.ini");
+var advancedProfile = new ServerProfile("advanced", advancedPath, null);
+const string advancedText = "\uFEFF# Ignored=fake\r\n; IgnoredToo=fake\nPublicName = A world  \r\n"
+    + "DefaultPort=16261\r\nPVP=true\r\nPassword=private\r\nDiscordToken=secret\r\nMods=First;Second\r\n"
+    + "FutureOption=a=b;c # literal\r\nFutureToken=opaque\r\nDuplicate=1\r\nduplicate=2\r\nrconport=27015";
+File.WriteAllText(advancedPath, advancedText);
+var advanced = ServerIniSettings.Open(advancedProfile);
+var iniFields = advanced.Fields.ToDictionary(field => field.Key);
+Check(iniFields["PublicName"].Group == ServerIniGroup.General
+    && iniFields["DefaultPort"].Group == ServerIniGroup.Network
+    && iniFields["PVP"].Kind == ServerIniKind.Flag
+    && iniFields["Password"].Kind == ServerIniKind.Secret && iniFields["FutureToken"].Kind == ServerIniKind.Secret
+    && iniFields["Mods"].Group == ServerIniGroup.Mods
+    && iniFields["FutureOption"] is { Group: ServerIniGroup.Other, Value: "a=b;c # literal" }
+    && iniFields["UDPPort"].Value == "16262" && !iniFields.ContainsKey("Ignored") && !iniFields.ContainsKey("IgnoredToo"),
+    "Group known keys, mask secrets, preserve unknown values, and ignore comment lines.");
+Check(iniFields["Duplicate"].IsAmbiguous && iniFields["RCONPort"].IsAmbiguous
+    && iniFields["Duplicate"].Value == "", "Ambiguous entries never use one occurrence as their apparent value.");
+foreach (var (key, value) in new[] { ("Duplicate", "change"), ("RCONPort", "27016"), ("DoesNotExist", "value"),
+             ("DefaultPort", "16262"), ("UDPPort", "65536"), ("MaxPlayers", "101"),
+             ("PVP", "yes"), ("FutureOption", "x\nPVP=false") })
+    CheckThrows<ArgumentException>(() => advanced.Save(new Dictionary<string, string> { [key] = value }),
+        $"Reject invalid, unknown, ambiguous or injection edit for {key}.");
+Check(File.ReadAllBytes(advancedPath).SequenceEqual(System.Text.Encoding.UTF8.GetBytes(advancedText)),
+    "Rejected edits leave the exact INI bytes unchanged.");
+var advancedChanges = new Dictionary<string, string>
+{
+    ["PublicName"] = "New world", ["FutureOption"] = "new=value;2", ["PVP"] = "FALSE",
+    ["DefaultPort"] = "16390", ["UDPPort"] = "16391"
+};
+Check(advanced.Save(advancedChanges), "Save changes across groups and write a previously missing fallback only when changed.");
+var advancedExpected = advancedText.Replace("A world", "New world").Replace("a=b;c # literal", "new=value;2")
+    .Replace("PVP=true", "PVP=false").Replace("DefaultPort=16261", "DefaultPort=16390") + "\r\nUDPPort=16391";
+Check(File.ReadAllBytes(advancedPath).SequenceEqual(System.Text.Encoding.UTF8.GetBytes(advancedExpected))
+    && File.ReadAllBytes(moddedIni).SequenceEqual(moddedBytes),
+    "Retain BOM, mixed newline style, whitespace, unchanged options, and sibling-profile data.");
+Check(!advanced.Save(advancedChanges), "Saving the same values again must not rewrite the INI.");
+File.AppendAllText(advancedPath, "\r\n# external");
+CheckThrows<ProfileConfigurationConflictException>(() => advanced.Save(new Dictionary<string, string> { ["PublicName"] = "Overwrite" }),
+    "Reject stale edits after a change anywhere in the snapshot.");
+Check(File.ReadAllBytes(advancedPath).SequenceEqual(System.Text.Encoding.UTF8.GetBytes(advancedExpected + "\r\n# external")),
+    "Conflict never overwrites an external edit.");
+Console.WriteLine("PASS: grouped INI settings validate edits and preserve unedited bytes and external changes");
+
 var sandboxProfile = profiles.Items.Single(profile => profile.Name == "alpha");
 var sandboxPath = Path.Combine(configDirectory, "alpha_SandboxVars.lua");
 CheckThrows<FileNotFoundException>(() => SandboxSettings.Open(sandboxProfile),
