@@ -66,16 +66,40 @@
                         <VerticalStackLayout x:Name="ProfileDetails" IsVisible="False" Spacing="10">
                             <Label x:Name="ProfileNameLabel" FontAttributes="Bold" FontSize="24"
                                    LineBreakMode="CharacterWrap" />
-                            <Label Text="Файл настроек" FontAttributes="Bold" />
-                            <Label x:Name="ProfileConfigurationLabel" LineBreakMode="CharacterWrap" />
-                            <Label Text="Папка мира" FontAttributes="Bold" />
-                            <Label x:Name="ProfileWorldLabel" LineBreakMode="CharacterWrap" />
                             <Label x:Name="SessionStatusLabel" FontAttributes="Bold" LineBreakMode="WordWrap" />
                             <HorizontalStackLayout Spacing="8">
                                 <Button x:Name="StartServerButton" Text="Запустить" Clicked="OnStartServerClicked" />
                                 <Button x:Name="StopServerButton" Text="Остановить" Clicked="OnStopServerClicked" />
                             </HorizontalStackLayout>
                             <Label x:Name="LaunchMessageLabel" IsVisible="False" LineBreakMode="WordWrap" />
+                            <HorizontalStackLayout Spacing="8">
+                                <Button x:Name="ShowProfileButton" Text="Профиль" Clicked="OnShowProfileClicked" IsEnabled="False" />
+                                <Button x:Name="ShowConsoleButton" Text="Консоль" Clicked="OnShowConsoleClicked" />
+                            </HorizontalStackLayout>
+                            <VerticalStackLayout x:Name="ProfilePane" Spacing="6">
+                                <Label Text="Файл настроек" FontAttributes="Bold" />
+                                <Label x:Name="ProfileConfigurationLabel" LineBreakMode="CharacterWrap" />
+                                <Label Text="Папка мира" FontAttributes="Bold" />
+                                <Label x:Name="ProfileWorldLabel" LineBreakMode="CharacterWrap" />
+                            </VerticalStackLayout>
+                            <VerticalStackLayout x:Name="ConsolePane" IsVisible="False" Spacing="6">
+                                <Editor x:Name="ConsoleOutput" IsReadOnly="True" HeightRequest="280"
+                                        FontFamily="Consolas" FontSize="12" Placeholder="Вывод сеанса пока отсутствует."
+                                        SemanticProperties.Description="Вывод выбранного сервера" />
+                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                    <Entry x:Name="ConsoleInput" Placeholder="Команда или ответ сервера"
+                                           MaxLength="1024" IsPassword="True" IsTextPredictionEnabled="False"
+                                           IsSpellCheckEnabled="False" Completed="OnSendConsoleClicked" />
+                                    <Button Grid.Column="1" x:Name="SendConsoleButton" Text="Отправить"
+                                            Clicked="OnSendConsoleClicked" />
+                                </Grid>
+                                <HorizontalStackLayout Spacing="4">
+                                    <CheckBox x:Name="MaskConsoleInput" IsChecked="True" CheckedChanged="OnMaskConsoleChanged"
+                                              SemanticProperties.Description="Скрывать ввод" />
+                                    <Label Text="Скрывать ввод (для паролей)" VerticalOptions="Center" />
+                                </HorizontalStackLayout>
+                                <Label x:Name="ConsoleMessage" IsVisible="False" LineBreakMode="WordWrap" />
+                            </VerticalStackLayout>
                         </VerticalStackLayout>
                     </VerticalStackLayout>
                 </ScrollView>
