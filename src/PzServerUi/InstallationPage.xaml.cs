@@ -232,10 +232,9 @@ public partial class InstallationPage : ContentPage
 
     private void ApplyHeroLayout(bool narrow, bool shortWindow)
     {
-        var console = ConsolePane.IsVisible;
-        ProfileHero.MinimumHeightRequest = console || shortWindow ? 0 : narrow ? 174 : 218;
-        HeroContent.Padding = console || narrow ? new Thickness(13, 10) : new Thickness(24, 19);
-        ProfileNameLabel.FontSize = console ? 25 : narrow ? 28 : 36;
+        ProfileHero.MinimumHeightRequest = shortWindow ? 0 : narrow ? 174 : 218;
+        HeroContent.Padding = narrow ? new Thickness(13, 10) : new Thickness(24, 19);
+        ProfileNameLabel.FontSize = narrow ? 28 : 36;
         Grid.SetRow(HeroActions, narrow ? 2 : 1);
         Grid.SetColumn(HeroActions, narrow ? 0 : 1);
         HeroActions.HorizontalOptions = narrow ? LayoutOptions.Start : LayoutOptions.End;
@@ -482,8 +481,6 @@ public partial class InstallationPage : ContentPage
         PaneFrame.StrokeThickness = framed ? 1 : 0;
         PaneFrame.Stroke = new SolidColorBrush(Color.FromArgb("#30352A"));
         PaneFrame.BackgroundColor = framed ? Color.FromArgb("#1C1F19") : Colors.Transparent;
-        if (WorkspaceLayout.Width > 0)
-            UpdateWorkspaceLayout();
         if (OverviewPane.IsVisible)
             LoadOverview(_profiles.Selected);
         if (ModsPane.IsVisible)
