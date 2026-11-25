@@ -7,6 +7,16 @@ namespace PzServerUi.Application;
 public interface IServerLaunchProcess : IDisposable
 {
     bool HasExited { get; }
+    bool ReadinessConfirmed { get; }
+}
+
+public enum ServerSessionStatus
+{
+    NotObserved,
+    Starting,
+    Running,
+    StartupFailed,
+    Ended,
 }
 
 public sealed record ServerLaunchResult(bool Started, string Message);
@@ -25,9 +35,15 @@ public sealed class ServerLaunches(Func<ProcessStartInfo, IServerLaunchProcess> 
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     private readonly object _gate = new();
-    private readonly Dictionary<string, IServerLaunchProcess> _activeLaunchers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Session> _sessions = new(StringComparer.OrdinalIgnoreCase);
 
     public ServerLaunches() : this(StartWindowsProcess) { }
+
+    public ServerSessionStatus GetStatus(ServerProfile profile)
+    {
+        lock (_gate)
+            return Observe(profile.Name);
+    }
 
     public ServerLaunchResult Start(string? installationFolder, ServerProfile profile)
     {
@@ -35,14 +51,8 @@ public sealed class ServerLaunches(Func<ProcessStartInfo, IServerLaunchProcess> 
         {
             try
             {
-                if (_activeLaunchers.TryGetValue(profile.Name, out var previous))
-                {
-                    if (!previous.HasExited)
-                        return Reject("Окно запуска этого профиля ещё открыто. Второй запуск не выполнен.");
-
-                    previous.Dispose();
-                    _activeLaunchers.Remove(profile.Name);
-                }
+                if (Observe(profile.Name) is ServerSessionStatus.Starting or ServerSessionStatus.Running)
+                    return Reject("Окно запуска этого профиля ещё открыто. Второй запуск не выполнен.");
 
                 if (string.IsNullOrWhiteSpace(installationFolder))
                     return Reject("Сначала выбери папку Dedicated Server.");
@@ -72,7 +82,7 @@ public sealed class ServerLaunches(Func<ProcessStartInfo, IServerLaunchProcess> 
                     Arguments = $"/d /v:off /c .\\{launcher} -servername \"{profile.Name}\"",
                     UseShellExecute = false,
                 };
-                _activeLaunchers[profile.Name] = startProcess(request);
+                _sessions[profile.Name] = new(startProcess(request));
                 return new(true, "Команда запуска передана. Готовность сервера ещё не подтверждена.");
             }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException
@@ -81,6 +91,31 @@ public sealed class ServerLaunches(Func<ProcessStartInfo, IServerLaunchProcess> 
                 return Reject($"Не удалось запустить профиль: {error.Message}");
             }
         }
+    }
+
+    private ServerSessionStatus Observe(string profileName)
+    {
+        if (!_sessions.TryGetValue(profileName, out var session))
+            return ServerSessionStatus.NotObserved;
+
+        if (session.Process is { } process)
+        {
+            var ready = session.Status == ServerSessionStatus.Starting && process.ReadinessConfirmed;
+            // Exit wins over a readiness signal which was not observed while the launcher was alive.
+            if (process.HasExited)
+            {
+                session.Process = null;
+                session.Status = session.Status == ServerSessionStatus.Running
+                    ? ServerSessionStatus.Ended
+                    : ServerSessionStatus.StartupFailed;
+                process.Dispose();
+            }
+            else if (ready)
+            {
+                session.Status = ServerSessionStatus.Running;
+            }
+        }
+        return session.Status;
     }
 
     private static bool ForwardsProfileName(string path)
@@ -119,6 +154,15 @@ public sealed class ServerLaunches(Func<ProcessStartInfo, IServerLaunchProcess> 
     private sealed class WindowsLaunchProcess(Process process) : IServerLaunchProcess
     {
         public bool HasExited => process.HasExited;
+        // A live cmd process is not evidence that its server is accepting connections.
+        // Keep this false until the Windows launcher can identify a signal from this exact session.
+        public bool ReadinessConfirmed => false;
         public void Dispose() => process.Dispose();
+    }
+
+    private sealed class Session(IServerLaunchProcess process)
+    {
+        public IServerLaunchProcess? Process { get; set; } = process;
+        public ServerSessionStatus Status { get; set; } = ServerSessionStatus.Starting;
     }
 }

@@ -175,6 +175,57 @@ if (OperatingSystem.IsWindows())
     Console.WriteLine("PASS: Windows batch argument probe preserves a profile name with spaces");
 }
 
+var sessionProcesses = new List<FakeLaunchProcess>();
+var sessions = new ServerLaunches(_ =>
+{
+    var process = new FakeLaunchProcess();
+    sessionProcesses.Add(process);
+    return process;
+});
+var alphaProfile = profiles.Items.Single(item => item.Name == "alpha");
+Check(sessions.GetStatus(namedProfile) == ServerSessionStatus.NotObserved,
+    "An undiscovered session must not be reported as stopped or running.");
+Check(sessions.Start(launchFolder, namedProfile).Started, "The first test session should launch.");
+Check(sessions.GetStatus(namedProfile) == ServerSessionStatus.Starting,
+    "A process existing must not be enough to mark the profile running.");
+Check(sessions.Start(launchFolder, alphaProfile).Started, "A second profile should launch independently.");
+sessionProcesses[1].ReadinessConfirmed = true;
+Check(sessions.GetStatus(alphaProfile) == ServerSessionStatus.Running
+    && sessions.GetStatus(namedProfile) == ServerSessionStatus.Starting,
+    "A readiness confirmation must apply only to the session it came from.");
+
+sessionProcesses[0].HasExited = true;
+Check(sessions.GetStatus(namedProfile) == ServerSessionStatus.StartupFailed,
+    "A launcher exit before confirmation must be visible as startup failure.");
+sessionProcesses[1].HasExited = true;
+Check(sessions.GetStatus(alphaProfile) == ServerSessionStatus.Ended,
+    "An already confirmed session should not be reported as a failed startup when its launcher exits.");
+Check(sessions.Start(launchFolder, alphaProfile).Started
+    && sessions.GetStatus(alphaProfile) == ServerSessionStatus.Starting,
+    "A new launch must not inherit readiness from the previous session of the same profile.");
+sessionProcesses[2].HasExited = true;
+sessionProcesses[2].ReadinessConfirmed = true;
+Check(sessions.GetStatus(alphaProfile) == ServerSessionStatus.StartupFailed,
+    "A readiness signal must not turn an already exited launcher into a running session.");
+Console.WriteLine("PASS: observes startup and exit by session, never borrowing or reusing readiness");
+
+if (OperatingSystem.IsWindows())
+{
+    var exitProbeDirectory = Directory.CreateDirectory(Path.Combine(sandbox.Path, "Early exit probe")).FullName;
+    File.WriteAllText(Path.Combine(exitProbeDirectory, "StartServer64.bat"), "@echo off\r\nexit /b 7\r\n"
+        + forwardingScript);
+    var windowsSessions = new ServerLaunches();
+    Check(windowsSessions.Start(exitProbeDirectory, namedProfile).Started,
+        "The harmless Windows launcher fixture should start a cmd process.");
+    var timeout = Stopwatch.StartNew();
+    while (windowsSessions.GetStatus(namedProfile) == ServerSessionStatus.Starting
+        && timeout.Elapsed < TimeSpan.FromSeconds(10))
+        await Task.Delay(25);
+    Check(windowsSessions.GetStatus(namedProfile) == ServerSessionStatus.StartupFailed,
+        "A real cmd exit must be reported as failed startup without ever declaring readiness.");
+    Console.WriteLine("PASS: Windows launcher exit is reported without starting a game process");
+}
+
 static void Check(bool condition, string message)
 {
     if (!condition)
@@ -191,5 +242,6 @@ sealed class TestDirectory : IDisposable
 sealed class FakeLaunchProcess : IServerLaunchProcess
 {
     public bool HasExited { get; set; }
+    public bool ReadinessConfirmed { get; set; }
     public void Dispose() { }
 }
