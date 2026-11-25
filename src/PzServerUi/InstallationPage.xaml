@@ -25,9 +25,27 @@
             <Setter Property="BackgroundColor" Value="#282D24" />
             <Setter Property="TextColor" Value="#EFEEE5" />
         </Style>
-        <Style x:Key="Primary" TargetType="Button" BasedOn="{StaticResource Action}">
+        <Style x:Key="ServerAction" TargetType="Button" BasedOn="{StaticResource Action}">
+            <Setter Property="MinimumHeightRequest" Value="44" />
+            <Setter Property="MinimumWidthRequest" Value="124" />
+            <Setter Property="Padding" Value="13,7" />
+            <Setter Property="BorderWidth" Value="1" />
+            <Setter Property="ContentLayout" Value="Left,7" />
+            <Style.Triggers>
+                <Trigger TargetType="Button" Property="IsEnabled" Value="False">
+                    <Setter Property="Opacity" Value=".55" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="Primary" TargetType="Button" BasedOn="{StaticResource ServerAction}">
             <Setter Property="BackgroundColor" Value="#D7B773" />
             <Setter Property="TextColor" Value="#252013" />
+            <Setter Property="BorderColor" Value="#D7B773" />
+        </Style>
+        <Style x:Key="Danger" TargetType="Button" BasedOn="{StaticResource ServerAction}">
+            <Setter Property="BackgroundColor" Value="#372824" />
+            <Setter Property="TextColor" Value="#ECA694" />
+            <Setter Property="BorderColor" Value="#66483E" />
         </Style>
         <Style x:Key="Link" TargetType="Button" BasedOn="{StaticResource Action}">
             <Setter Property="BackgroundColor" Value="Transparent" />
@@ -48,6 +66,16 @@
             <Setter Property="FontSize" Value="19" />
             <Setter Property="LineBreakMode" Value="TailTruncation" />
         </Style>
+        <Style x:Key="InlineIcon" TargetType="Image">
+            <Setter Property="WidthRequest" Value="16" />
+            <Setter Property="HeightRequest" Value="16" />
+            <Setter Property="VerticalOptions" Value="Center" />
+            <Setter Property="InputTransparent" Value="True" />
+        </Style>
+        <Style x:Key="MetricLabel" TargetType="Label" BasedOn="{StaticResource Muted}">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="VerticalOptions" Value="Center" />
+        </Style>
     </ContentPage.Resources>
     <Grid RowDefinitions="Auto,*">
         <Grid RowDefinitions="Auto,1,Auto,Auto" BackgroundColor="#191B16">
@@ -55,8 +83,8 @@
                 <Grid Padding="20,8" ColumnDefinitions="38,*" ColumnSpacing="11" VerticalOptions="Center">
                     <Border Stroke="#494231" BackgroundColor="#2B281E" StrokeShape="RoundRectangle 9"
                             WidthRequest="38" HeightRequest="38">
-                        <Label Text="&#xE968;" FontFamily="Segoe MDL2 Assets" FontSize="18" TextColor="#D7B773"
-                               HorizontalOptions="Center" VerticalOptions="Center" />
+                        <Image Source="design_server.png" Style="{StaticResource InlineIcon}" WidthRequest="19" HeightRequest="19"
+                               HorizontalOptions="Center" />
                     </Border>
                     <VerticalStackLayout Grid.Column="1" Spacing="2" VerticalOptions="Center">
                         <Label Text="PZ Server UI" FontAttributes="Bold" FontSize="16" SemanticProperties.HeadingLevel="Level1" />
@@ -69,12 +97,15 @@
                     <Label x:Name="HeaderTitle" Grid.Column="1" Text="Обзор сервера" Margin="26,0" FontSize="14"
                            VerticalOptions="Center" Style="{StaticResource Muted}" />
                     <HorizontalStackLayout Grid.Column="2" Margin="0,0,16,0" Spacing="6" VerticalOptions="Center">
-                        <Label x:Name="LocalModeLabel" Text="●  Локальный режим" FontSize="12" Margin="0,0,9,0"
-                               Style="{StaticResource Muted}" VerticalOptions="Center" />
+                        <HorizontalStackLayout x:Name="LocalModeLabel" Spacing="7" Margin="0,0,9,0" VerticalOptions="Center">
+                            <BoxView WidthRequest="7" HeightRequest="7" CornerRadius="4" Color="#A9C18E" VerticalOptions="Center" />
+                            <Label Text="Локальный режим" Style="{StaticResource MetricLabel}" />
+                        </HorizontalStackLayout>
                         <Button x:Name="ToggleProfilesButton" Text="Профили" IsVisible="False"
                                 Style="{StaticResource Action}" Clicked="OnToggleProfilesClicked" />
-                        <Button x:Name="CompactChooseFolderButton" Text="Установка" IsVisible="False" Style="{StaticResource Action}"
-                                Clicked="OnChooseFolderClicked" SemanticProperties.Description="Выбрать папку Dedicated Server" />
+                        <Button x:Name="CompactChooseFolderButton" Text="Установка" ImageSource="design_folder.png" ContentLayout="Left,6"
+                                IsVisible="False" Style="{StaticResource Action}" Clicked="OnChooseFolderClicked"
+                                SemanticProperties.Description="Выбрать папку Dedicated Server" />
                     </HorizontalStackLayout>
                 </Grid>
             </Grid>
@@ -94,14 +125,13 @@
                                 BackgroundColor="#23271E" VerticalOptions="Center">
                             <Label x:Name="ProfileCountLabel" Text="0" FontSize="11" Style="{StaticResource Muted}" />
                         </Border>
-                        <Button Grid.Column="3" Text="&#xE72C;" FontFamily="Segoe MDL2 Assets" Style="{StaticResource Link}"
+                        <Button Grid.Column="3" ImageSource="design_refresh.png" Style="{StaticResource Link}"
                                 Padding="8" Clicked="OnRefreshProfilesClicked"
                                 SemanticProperties.Description="Обновить список профилей" ToolTipProperties.Text="Обновить профили" />
                     </Grid>
                     <Border Grid.Row="1" Stroke="#30352A" StrokeShape="RoundRectangle 8" BackgroundColor="#171914">
                         <Grid ColumnDefinitions="30,*">
-                            <Label Text="&#xE721;" FontFamily="Segoe MDL2 Assets" FontSize="13" Style="{StaticResource Muted}"
-                                   HorizontalOptions="Center" VerticalOptions="Center" />
+                            <Image Source="design_search.png" Style="{StaticResource InlineIcon}" HorizontalOptions="Center" />
                             <Entry Grid.Column="1" x:Name="ProfileSearch" Placeholder="Найти профиль" TextChanged="OnProfileSearchChanged"
                                    BackgroundColor="Transparent" SemanticProperties.Description="Поиск по имени профиля" />
                         </Grid>
@@ -147,8 +177,7 @@
                         <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="33,*" ColumnSpacing="8" RowSpacing="3">
                             <Border Stroke="#30352A" BackgroundColor="#23271E" StrokeShape="RoundRectangle 7"
                                     HeightRequest="33" WidthRequest="33" VerticalOptions="Start">
-                                <Label Text="&#xE8B7;" FontFamily="Segoe MDL2 Assets" Style="{StaticResource Muted}"
-                                       VerticalOptions="Center" HorizontalOptions="Center" />
+                                <Image Source="design_folder.png" Style="{StaticResource InlineIcon}" HorizontalOptions="Center" />
                             </Border>
                             <VerticalStackLayout Grid.Column="1" Spacing="2">
                                 <Label Text="Dedicated Server" FontSize="12" FontAttributes="Bold" />
@@ -190,20 +219,20 @@
                                            MaxLines="2" LineBreakMode="TailTruncation" SemanticProperties.HeadingLevel="Level2" />
                                     <Border x:Name="SessionPill" Padding="8,4" Stroke="#404338" StrokeShape="RoundRectangle 5"
                                             BackgroundColor="#282C24" HorizontalOptions="Start">
-                                        <Label x:Name="SessionStatusLabel" FontAttributes="Bold" FontSize="11" LineBreakMode="WordWrap" />
+                                        <Grid ColumnDefinitions="7,*" ColumnSpacing="6">
+                                            <BoxView x:Name="SessionDot" WidthRequest="7" HeightRequest="7" CornerRadius="4"
+                                                     Color="#9A9C90" VerticalOptions="Center" />
+                                            <Label Grid.Column="1" x:Name="SessionStatusLabel" FontAttributes="Bold" FontSize="11" LineBreakMode="WordWrap" />
+                                        </Grid>
                                     </Border>
                                 </VerticalStackLayout>
-                                <FlexLayout x:Name="HeroActions" Grid.Row="1" Grid.Column="1" Wrap="Wrap" AlignItems="End"
-                                            VerticalOptions="End" JustifyContent="End">
-                                    <Button x:Name="StartServerButton" Text="Запустить" Clicked="OnStartServerClicked"
-                                            Style="{StaticResource Primary}" Margin="0,0,6,0" ContentLayout="Left,7">
-                                        <Button.ImageSource>
-                                            <FontImageSource Glyph="&#xE768;" FontFamily="Segoe MDL2 Assets" Color="#252013" Size="12" />
-                                        </Button.ImageSource>
-                                    </Button>
-                                    <Button x:Name="StopServerButton" Text="Остановить" Clicked="OnStopServerClicked"
-                                            Style="{StaticResource Action}" TextColor="#ECA694" BackgroundColor="#372824" />
-                                </FlexLayout>
+                                <Grid x:Name="HeroActions" Grid.Row="1" Grid.Column="1" ColumnDefinitions="Auto,Auto"
+                                      RowDefinitions="Auto,Auto" ColumnSpacing="14" VerticalOptions="End" HorizontalOptions="End">
+                                    <Button x:Name="StartServerButton" Text="Запустить" ImageSource="design_play.png"
+                                            Clicked="OnStartServerClicked" Style="{StaticResource Primary}" />
+                                    <Button Grid.Column="1" x:Name="StopServerButton" Text="Остановить" ImageSource="design_stop.png"
+                                            Clicked="OnStopServerClicked" Style="{StaticResource Danger}" />
+                                </Grid>
                                 <Label Grid.Row="3" Grid.ColumnSpan="2" x:Name="StopHint" FontSize="11" TextColor="#D3D4C5"
                                        IsVisible="False" LineBreakMode="WordWrap" />
                             </Grid>
@@ -213,27 +242,23 @@
                         <BoxView Grid.Row="1" Color="#30352A" HeightRequest="1" VerticalOptions="End" />
                         <HorizontalStackLayout x:Name="TabsStrip" Spacing="10">
                             <Grid RowDefinitions="Auto,2">
-                                <Button x:Name="ShowOverviewButton" Text="Обзор" Style="{StaticResource Tab}" Clicked="OnShowOverviewClicked">
-                                    <Button.ImageSource><FontImageSource Glyph="&#xE80A;" FontFamily="Segoe MDL2 Assets" Size="14" /></Button.ImageSource>
-                                </Button>
+                                <Button x:Name="ShowOverviewButton" Text="Обзор" ImageSource="design_grid.png"
+                                        Style="{StaticResource Tab}" Clicked="OnShowOverviewClicked" />
                                 <BoxView x:Name="OverviewUnderline" Grid.Row="1" Color="#D7B773" />
                             </Grid>
                             <Grid RowDefinitions="Auto,2">
-                                <Button x:Name="ShowProfileButton" Text="Профиль" Style="{StaticResource Tab}" Clicked="OnShowProfileClicked">
-                                    <Button.ImageSource><FontImageSource Glyph="&#xE713;" FontFamily="Segoe MDL2 Assets" Size="14" /></Button.ImageSource>
-                                </Button>
+                                <Button x:Name="ShowProfileButton" Text="Профиль" ImageSource="design_sliders.png"
+                                        Style="{StaticResource Tab}" Clicked="OnShowProfileClicked" />
                                 <BoxView x:Name="ProfileUnderline" Grid.Row="1" Color="#D7B773" IsVisible="False" />
                             </Grid>
                             <Grid RowDefinitions="Auto,2">
-                                <Button x:Name="ShowModsButton" Text="Моды" Style="{StaticResource Tab}" Clicked="OnShowModsClicked">
-                                    <Button.ImageSource><FontImageSource Glyph="&#xE7B8;" FontFamily="Segoe MDL2 Assets" Size="14" /></Button.ImageSource>
-                                </Button>
+                                <Button x:Name="ShowModsButton" Text="Моды" ImageSource="design_box.png"
+                                        Style="{StaticResource Tab}" Clicked="OnShowModsClicked" />
                                 <BoxView x:Name="ModsUnderline" Grid.Row="1" Color="#D7B773" IsVisible="False" />
                             </Grid>
                             <Grid RowDefinitions="Auto,2">
-                                <Button x:Name="ShowConsoleButton" Text="Консоль" Style="{StaticResource Tab}" Clicked="OnShowConsoleClicked">
-                                    <Button.ImageSource><FontImageSource Glyph="&#xE756;" FontFamily="Segoe MDL2 Assets" Size="14" /></Button.ImageSource>
-                                </Button>
+                                <Button x:Name="ShowConsoleButton" Text="Консоль" ImageSource="design_terminal.png"
+                                        Style="{StaticResource Tab}" Clicked="OnShowConsoleClicked" />
                                 <BoxView x:Name="ConsoleUnderline" Grid.Row="1" Color="#D7B773" IsVisible="False" />
                             </Grid>
                         </HorizontalStackLayout>
@@ -255,28 +280,40 @@
                                 <Grid x:Name="OverviewMetrics" ColumnDefinitions="*,*,*,*" RowDefinitions="Auto,Auto" ColumnSpacing="10">
                                     <Border Style="{StaticResource Card}" Padding="12,10">
                                         <VerticalStackLayout Spacing="4">
-                                            <Label Text="Сеанс" Style="{StaticResource Muted}" FontSize="12" />
+                                            <Grid ColumnDefinitions="16,*" ColumnSpacing="7">
+                                                <Image Source="design_clock.png" Style="{StaticResource InlineIcon}" />
+                                                <Label Grid.Column="1" Text="Сеанс" Style="{StaticResource MetricLabel}" />
+                                            </Grid>
                                             <Label x:Name="OverviewSession" Style="{StaticResource MetricValue}" />
                                             <Label x:Name="OverviewSessionHint" FontSize="11" Style="{StaticResource Muted}" LineBreakMode="WordWrap" />
                                         </VerticalStackLayout>
                                     </Border>
                                     <Border Grid.Column="1" Style="{StaticResource Card}" Padding="12,10">
                                         <VerticalStackLayout Spacing="4">
-                                            <Label Text="Лимит игроков" Style="{StaticResource Muted}" FontSize="12" />
+                                            <Grid ColumnDefinitions="16,*" ColumnSpacing="7">
+                                                <Image Source="design_users.png" Style="{StaticResource InlineIcon}" />
+                                                <Label Grid.Column="1" Text="Лимит игроков" Style="{StaticResource MetricLabel}" />
+                                            </Grid>
                                             <Label x:Name="OverviewLimit" Style="{StaticResource MetricValue}" />
                                             <Label Text="По настройкам профиля" FontSize="11" Style="{StaticResource Muted}" />
                                         </VerticalStackLayout>
                                     </Border>
                                     <Border x:Name="PortsCard" Grid.Column="2" Style="{StaticResource Card}" Padding="12,10">
                                         <VerticalStackLayout Spacing="4">
-                                            <Label Text="Игровой UDP" Style="{StaticResource Muted}" FontSize="12" />
+                                            <Grid ColumnDefinitions="16,*" ColumnSpacing="7">
+                                                <Image Source="design_plug.png" Style="{StaticResource InlineIcon}" />
+                                                <Label Grid.Column="1" Text="Игровой UDP" Style="{StaticResource MetricLabel}" />
+                                            </Grid>
                                             <Label x:Name="OverviewPorts" Style="{StaticResource MetricValue}" />
                                             <Label Text="По настройкам профиля" FontSize="11" Style="{StaticResource Muted}" />
                                         </VerticalStackLayout>
                                     </Border>
                                     <Border x:Name="ModsCard" Grid.Column="3" Style="{StaticResource Card}" Padding="12,10">
                                         <VerticalStackLayout Spacing="4">
-                                            <Label Text="Моды" Style="{StaticResource Muted}" FontSize="12" />
+                                            <Grid ColumnDefinitions="16,*" ColumnSpacing="7">
+                                                <Image Source="design_box.png" Style="{StaticResource InlineIcon}" />
+                                                <Label Grid.Column="1" Text="Моды" Style="{StaticResource MetricLabel}" />
+                                            </Grid>
                                             <Label x:Name="OverviewModCount" Style="{StaticResource MetricValue}" />
                                             <Label Text="Mod ID в профиле" FontSize="11" Style="{StaticResource Muted}" />
                                         </VerticalStackLayout>
@@ -286,9 +323,10 @@
                                       ColumnSpacing="12" RowSpacing="0">
                                     <Border Style="{StaticResource Card}" Padding="13" VerticalOptions="Start">
                                         <VerticalStackLayout Spacing="6">
-                                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="4">
-                                                <Label Text="Последние записи" Style="{StaticResource SectionTitle}" SemanticProperties.HeadingLevel="Level3" />
-                                                <Button Grid.Column="1" Text="В консоль  →" Style="{StaticResource Link}" Clicked="OnShowConsoleClicked" />
+                                            <Grid ColumnDefinitions="16,*,Auto" ColumnSpacing="7">
+                                                <Image Source="design_terminal.png" Style="{StaticResource InlineIcon}" />
+                                                <Label Grid.Column="1" Text="Последние записи" Style="{StaticResource SectionTitle}" SemanticProperties.HeadingLevel="Level3" />
+                                                <Button Grid.Column="2" Text="В консоль  →" Style="{StaticResource Link}" Clicked="OnShowConsoleClicked" />
                                             </Grid>
                                             <Border Stroke="#2D3428" StrokeShape="RoundRectangle 7" BackgroundColor="#131611" Padding="10">
                                                 <Label x:Name="OverviewLog" FontFamily="Consolas" FontSize="11"
@@ -298,9 +336,10 @@
                                     </Border>
                                     <Border x:Name="InstanceCard" Grid.Column="1" Style="{StaticResource Card}" Padding="13" VerticalOptions="Start">
                                         <VerticalStackLayout Spacing="6">
-                                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="4">
-                                                <Label Text="Данные экземпляра" Style="{StaticResource SectionTitle}" SemanticProperties.HeadingLevel="Level3" />
-                                                <Button Grid.Column="1" Text="Профиль  →" Style="{StaticResource Link}" Clicked="OnShowProfileClicked" />
+                                            <Grid ColumnDefinitions="16,*,Auto" ColumnSpacing="7">
+                                                <Image Source="design_info.png" Style="{StaticResource InlineIcon}" />
+                                                <Label Grid.Column="1" Text="Данные экземпляра" Style="{StaticResource SectionTitle}" SemanticProperties.HeadingLevel="Level3" />
+                                                <Button Grid.Column="2" Text="Профиль  →" Style="{StaticResource Link}" Clicked="OnShowProfileClicked" />
                                             </Grid>
                                             <Grid ColumnDefinitions="65,*" RowDefinitions="Auto,1,Auto,1,Auto,1,Auto" RowSpacing="5">
                                                 <Label Text="Профиль" Style="{StaticResource Muted}" FontSize="12" />
@@ -351,8 +390,11 @@
                                 <Label x:Name="SandboxMessage" IsVisible="False" LineBreakMode="WordWrap" />
                                 <BoxView Margin="0,8" HeightRequest="1"
                                          Color="{AppThemeBinding Light=#CFD4C3, Dark=#34392E}" />
-                                <Label Text="Основные настройки" FontSize="18" FontAttributes="Bold"
-                                       SemanticProperties.HeadingLevel="Level2" />
+                                <HorizontalStackLayout Spacing="8">
+                                    <Image Source="design_sliders.png" Style="{StaticResource InlineIcon}" />
+                                    <Label Text="Основные настройки" Style="{StaticResource SectionTitle}"
+                                           SemanticProperties.HeadingLevel="Level2" />
+                                </HorizontalStackLayout>
                                 <Label Text="Изменения применяются при следующем запуске. Сохранение не перезапускает сервер."
                                        LineBreakMode="WordWrap" />
                                 <VerticalStackLayout x:Name="BasicFields" IsVisible="False" Spacing="5">
@@ -379,8 +421,11 @@
                                 <Label x:Name="BasicMessage" IsVisible="False" LineBreakMode="WordWrap" />
                             </VerticalStackLayout>
                             <VerticalStackLayout x:Name="ModsPane" IsVisible="False" Spacing="8">
-                                <Label Text="Моды выбранного профиля" FontSize="18" FontAttributes="Bold"
-                                       SemanticProperties.HeadingLevel="Level2" />
+                                <HorizontalStackLayout Spacing="8">
+                                    <Image Source="design_box.png" Style="{StaticResource InlineIcon}" />
+                                    <Label Text="Моды выбранного профиля" Style="{StaticResource SectionTitle}"
+                                           SemanticProperties.HeadingLevel="Level2" />
+                                </HorizontalStackLayout>
                                 <Label Text="Список из INI. Он не показывает, какие моды загружены в текущем сеансе."
                                        LineBreakMode="WordWrap" />
                                 <Entry x:Name="ModSearch" Placeholder="Найти Mod ID или Workshop ID" TextChanged="OnModSearchChanged"
@@ -397,13 +442,19 @@
                           </VerticalStackLayout>
                         </ScrollView>
                             <Grid x:Name="ConsolePane" IsVisible="False" RowDefinitions="Auto,*,Auto,Auto,Auto" RowSpacing="5">
-                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                                    <Entry x:Name="ConsoleSearch" Placeholder="Поиск по журналу" TextChanged="OnConsoleSearchChanged"
-                                           SemanticProperties.Description="Поиск по журналу выбранного сеанса" />
-                                    <Picker Grid.Column="1" x:Name="ConsoleLevelPicker" Title="Все уровни"
-                                            SelectedIndexChanged="OnConsoleLevelChanged"
-                                            SemanticProperties.Description="Фильтр журнала по уровню" />
-                                </Grid>
+                                <VerticalStackLayout Spacing="6">
+                                    <HorizontalStackLayout Spacing="8">
+                                        <Image Source="design_terminal.png" Style="{StaticResource InlineIcon}" />
+                                        <Label Text="Журнал сеанса" Style="{StaticResource SectionTitle}" SemanticProperties.HeadingLevel="Level2" />
+                                    </HorizontalStackLayout>
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                                        <Entry x:Name="ConsoleSearch" Placeholder="Поиск по журналу" TextChanged="OnConsoleSearchChanged"
+                                               SemanticProperties.Description="Поиск по журналу выбранного сеанса" />
+                                        <Picker Grid.Column="1" x:Name="ConsoleLevelPicker" Title="Все уровни"
+                                                SelectedIndexChanged="OnConsoleLevelChanged"
+                                                SemanticProperties.Description="Фильтр журнала по уровню" />
+                                    </Grid>
+                                </VerticalStackLayout>
                                 <Border Grid.Row="1" Stroke="#2D3428" StrokeShape="RoundRectangle 7" BackgroundColor="#131611" Padding="5">
                                     <Editor x:Name="ConsoleOutput" IsReadOnly="True" BackgroundColor="Transparent"
                                             FontFamily="Consolas" FontSize="12" Placeholder="В журнале пока нет строк."

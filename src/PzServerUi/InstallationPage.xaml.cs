@@ -239,7 +239,12 @@ public partial class InstallationPage : ContentPage
         ProfileNameLabel.FontSize = console ? 25 : narrow ? 28 : 36;
         Grid.SetRow(HeroActions, narrow ? 2 : 1);
         Grid.SetColumn(HeroActions, narrow ? 0 : 1);
-        HeroActions.JustifyContent = narrow ? Microsoft.Maui.Layouts.FlexJustify.Start : Microsoft.Maui.Layouts.FlexJustify.End;
+        HeroActions.HorizontalOptions = narrow ? LayoutOptions.Start : LayoutOptions.End;
+        var stackActions = narrow && WorkspaceLayout.Width < 350;
+        HeroActions.ColumnSpacing = stackActions ? 0 : 14;
+        HeroActions.RowSpacing = stackActions ? 8 : 0;
+        Grid.SetRow(StopServerButton, stackActions ? 1 : 0);
+        Grid.SetColumn(StopServerButton, stackActions ? 0 : 1);
     }
 
     private void ShowSelectedProfile(ServerProfile? profile)
@@ -393,6 +398,13 @@ public partial class InstallationPage : ContentPage
             or ServerSessionStatus.Stopping or ServerSessionStatus.StopUnconfirmed;
         SessionStatusLabel.Text = presentation.Detail;
         SessionStatusLabel.TextColor = ProfileRow.GetColor(presentation.Tone, true);
+        SessionDot.Color = presentation.Tone switch
+        {
+            StatusTone.Ready => Color.FromArgb("#A9C18E"),
+            StatusTone.Attention => Color.FromArgb("#D7B773"),
+            StatusTone.Error => Color.FromArgb("#ECA694"),
+            _ => Color.FromArgb("#9A9C90")
+        };
         var pill = presentation.Tone switch
         {
             StatusTone.Ready => (Background: "#263321", Stroke: "#3E5435"),
@@ -481,8 +493,6 @@ public partial class InstallationPage : ContentPage
     {
         underline.IsVisible = selected;
         button.TextColor = Color.FromArgb(selected ? "#D7B773" : "#ADB1A1");
-        if (button.ImageSource is FontImageSource icon)
-            icon.Color = button.TextColor;
         SemanticProperties.SetDescription(button, selected ? $"{button.Text}, текущая вкладка" : button.Text);
     }
 

@@ -20,5 +20,6 @@
     <ProjectReference Include="../PzServerUi.Application/PzServerUi.Application.csproj" />
     <MauiIcon Include="Resources/AppIcon/appicon.svg" />
     <MauiImage Include="Resources/Images/profile_server.svg" />
+    <MauiImage Include="Resources/Images/Icons/design_*.svg" BaseSize="18,18" />
   </ItemGroup>
 </Project>
