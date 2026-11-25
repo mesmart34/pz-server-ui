@@ -146,7 +146,7 @@ public partial class InstallationPage : ContentPage
             var rows = _profileRows.Where(row => OverviewQueries.Matches(row.Name, ProfileSearch.Text)).ToArray();
             ProfileList.ItemsSource = rows;
             ProfileList.SelectedItem = rows.FirstOrDefault(row => row.Name == _profiles.Selected?.Name);
-            ProfileCountLabel.Text = $"Профили · {_profileRows.Length}";
+            ProfileCountLabel.Text = rows.Length.ToString(CultureInfo.InvariantCulture);
             ProfileListMessage.Text = _profileRows.Length == 0
                 ? $"Профили не найдены в {_profiles.ConfigurationDirectory}."
                 : rows.Length == 0 ? "Нет совпадений." : "";
@@ -177,11 +177,12 @@ public partial class InstallationPage : ContentPage
     {
         if (DetailsArea is null || WorkspaceLayout.Width <= 0)
             return;
-        var compact = WorkspaceLayout.Width < 750;
-        if (_compact == compact)
-            return;
-        _compact = compact;
-        _showCompactProfiles = false;
+        var compact = WorkspaceLayout.Width < 650;
+        if (_compact != compact)
+        {
+            _compact = compact;
+            _showCompactProfiles = false;
+        }
         UpdateWorkspaceLayout();
     }
 
@@ -195,14 +196,50 @@ public partial class InstallationPage : ContentPage
 
     private void UpdateWorkspaceLayout()
     {
+        var width = WorkspaceLayout.Width;
+        var sidebar = width < 900 ? 205 : 248;
+        var narrow = _compact || width - sidebar < 650;
+        var shortWindow = WorkspaceLayout.Height < 550;
         ToggleProfilesButton.IsVisible = _compact;
         ToggleProfilesButton.Text = _showCompactProfiles ? "К экземпляру" : "Профили";
-        WorkspaceLayout.ColumnDefinitions[0].Width = _compact ? new GridLength(1, GridUnitType.Star) : new GridLength(248);
-        WorkspaceLayout.ColumnDefinitions[1].Width = _compact ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
-        WorkspaceLayout.ColumnSpacing = _compact ? 0 : 12;
+        CompactChooseFolderButton.IsVisible = CompactFolderPath.IsVisible = _compact;
+        HeaderDivider.IsVisible = HeaderTitle.IsVisible = LocalModeLabel.IsVisible = !_compact;
+        HeaderLayout.ColumnDefinitions[0].Width = _compact ? GridLength.Star : new GridLength(sidebar);
+        HeaderLayout.ColumnDefinitions[1].Width = _compact ? GridLength.Auto : GridLength.Star;
+        WorkspaceLayout.ColumnDefinitions[0].Width = _compact ? GridLength.Star : new GridLength(sidebar);
+        WorkspaceLayout.ColumnDefinitions[1].Width = _compact ? new GridLength(0) : GridLength.Star;
         Grid.SetColumn(DetailsArea, _compact ? 0 : 1);
         ProfilesCard.IsVisible = !_compact || _showCompactProfiles;
         DetailsArea.IsVisible = !_compact || !_showCompactProfiles;
+        DetailsArea.Padding = narrow ? new Thickness(13, 12, 13, 10) : new Thickness(26, 18, 26, 16);
+        ApplyHeroLayout(narrow, shortWindow);
+
+        var splitMetrics = (_compact ? width : width - sidebar) < 466;
+        OverviewMetrics.ColumnDefinitions[2].Width = OverviewMetrics.ColumnDefinitions[3].Width =
+            splitMetrics ? new GridLength(0) : GridLength.Star;
+        OverviewMetrics.RowSpacing = splitMetrics ? 8 : 0;
+        Grid.SetRow(PortsCard, splitMetrics ? 1 : 0);
+        Grid.SetColumn(PortsCard, splitMetrics ? 0 : 2);
+        Grid.SetRow(ModsCard, splitMetrics ? 1 : 0);
+        Grid.SetColumn(ModsCard, splitMetrics ? 1 : 3);
+        OverviewPanels.ColumnDefinitions[1].Width = narrow ? new GridLength(0) : new GridLength(2, GridUnitType.Star);
+        OverviewPanels.RowSpacing = narrow ? 10 : 0;
+        Grid.SetRow(InstanceCard, narrow ? 1 : 0);
+        Grid.SetColumn(InstanceCard, narrow ? 0 : 1);
+        TabsStrip.Spacing = width < 520 ? 0 : 10;
+        var tabPadding = width < 520 ? new Thickness(7, 5) : new Thickness(12, 5);
+        ShowOverviewButton.Padding = ShowProfileButton.Padding = ShowModsButton.Padding = ShowConsoleButton.Padding = tabPadding;
+    }
+
+    private void ApplyHeroLayout(bool narrow, bool shortWindow)
+    {
+        var console = ConsolePane.IsVisible;
+        ProfileHero.MinimumHeightRequest = console || shortWindow ? 0 : narrow ? 174 : 218;
+        HeroContent.Padding = console || narrow ? new Thickness(13, 10) : new Thickness(24, 19);
+        ProfileNameLabel.FontSize = console ? 25 : narrow ? 28 : 36;
+        Grid.SetRow(HeroActions, narrow ? 2 : 1);
+        Grid.SetColumn(HeroActions, narrow ? 0 : 1);
+        HeroActions.JustifyContent = narrow ? Microsoft.Maui.Layouts.FlexJustify.Start : Microsoft.Maui.Layouts.FlexJustify.End;
     }
 
     private void ShowSelectedProfile(ServerProfile? profile)
@@ -230,6 +267,9 @@ public partial class InstallationPage : ContentPage
             return;
 
         ProfileNameLabel.Text = profile.Name;
+        ProfileBreadcrumb.Text = $"Профили  ›  {profile.Name}";
+        OverviewProfileName.Text = profile.Name;
+        OverviewWorld.Text = profile.WorldPath is { } worldPath ? Path.GetFileName(worldPath) : "Не найден";
         if (changed)
             LoadOverview(profile);
         SelectedCover.Source = _profileRows.FirstOrDefault(row => row.Name == profile.Name)?.Cover;
@@ -352,8 +392,38 @@ public partial class InstallationPage : ContentPage
         var ownActive = status is ServerSessionStatus.Starting or ServerSessionStatus.Running
             or ServerSessionStatus.Stopping or ServerSessionStatus.StopUnconfirmed;
         SessionStatusLabel.Text = presentation.Detail;
-        SessionStatusLabel.SetAppThemeColor(Label.TextColorProperty,
-            ProfileRow.GetColor(presentation.Tone, false), ProfileRow.GetColor(presentation.Tone, true));
+        SessionStatusLabel.TextColor = ProfileRow.GetColor(presentation.Tone, true);
+        var pill = presentation.Tone switch
+        {
+            StatusTone.Ready => (Background: "#263321", Stroke: "#3E5435"),
+            StatusTone.Attention => (Background: "#353024", Stroke: "#534835"),
+            StatusTone.Error => (Background: "#352520", Stroke: "#563C33"),
+            _ => (Background: "#282C24", Stroke: "#404338")
+        };
+        var pillBackground = Color.FromArgb(pill.Background);
+        if (!Equals(SessionPill.BackgroundColor, pillBackground))
+        {
+            SessionPill.BackgroundColor = pillBackground;
+            SessionPill.Stroke = new SolidColorBrush(Color.FromArgb(pill.Stroke));
+        }
+        OverviewSession.Text = status switch
+        {
+            ServerSessionStatus.Running => "Готов",
+            ServerSessionStatus.Starting => "Запускается",
+            ServerSessionStatus.Stopping => "Остановка",
+            ServerSessionStatus.StopUnconfirmed => "Не подтверждён",
+            _ when external == ExternalServerStatus.ProcessObserved => "Внешний",
+            _ when external == ExternalServerStatus.Ambiguous => "Не определён",
+            _ => "—"
+        };
+        OverviewSessionHint.Text = status == ServerSessionStatus.Running
+            ? "Готовность подтверждена" : "Готовность не подтверждена";
+        OverviewLaunchSource.Text = ownActive ? "Из панели" : external switch
+        {
+            ExternalServerStatus.ProcessObserved => "Вне панели",
+            ExternalServerStatus.Ambiguous => "Не определён",
+            _ => "Нет активного сеанса"
+        };
         StartServerButton.IsEnabled = !_closeInProgress && _savedInstallationFolder is not null
             && !ownActive && external == ExternalServerStatus.NotObserved;
         StopServerButton.IsEnabled = !_closeInProgress && status == ServerSessionStatus.Running;
@@ -362,15 +432,15 @@ public partial class InstallationPage : ContentPage
         var pending = _pendingSettings.ContainsKey(profile.Name);
         PendingSettingsLabel.IsVisible = pending;
         PendingSettingsLabel.Text = "Изменения сохранены. Вступят в силу при следующем запуске.";
-        OverviewNotice.IsVisible = pending;
+        OverviewNoticeCard.IsVisible = pending;
         OverviewNotice.Text = PendingSettingsLabel.Text;
         LaunchMessageLabel.Text = _launchMessages.GetValueOrDefault(profile.Name)
             ?? (_savedInstallationFolder is null ? "Выбери папку Dedicated Server, чтобы запустить профиль." : "");
-        LaunchMessageLabel.IsVisible = LaunchMessageLabel.Text.Length > 0;
+        LaunchNotice.IsVisible = LaunchMessageLabel.Text.Length > 0;
         var canSend = !_sendingConsole && !_closeInProgress && !_launching.Contains(profile.Name)
             && status is ServerSessionStatus.Starting or ServerSessionStatus.Running;
         ConsoleInput.IsEnabled = SendConsoleButton.IsEnabled = canSend;
-        if (ConsolePane.IsVisible)
+        if (ConsolePane.IsVisible || OverviewPane.IsVisible)
             RefreshConsole(profile);
     }
 
@@ -386,10 +456,17 @@ public partial class InstallationPage : ContentPage
         ModsPane.IsVisible = pane == ModsPane;
         ConsolePane.IsVisible = pane == ConsolePane;
         DetailsScroll.IsVisible = !ConsolePane.IsVisible;
-        SetTab(ShowOverviewButton, OverviewPane.IsVisible);
-        SetTab(ShowProfileButton, ProfilePane.IsVisible);
-        SetTab(ShowModsButton, ModsPane.IsVisible);
-        SetTab(ShowConsoleButton, ConsolePane.IsVisible);
+        SetTab(ShowOverviewButton, OverviewUnderline, OverviewPane.IsVisible);
+        SetTab(ShowProfileButton, ProfileUnderline, ProfilePane.IsVisible);
+        SetTab(ShowModsButton, ModsUnderline, ModsPane.IsVisible);
+        SetTab(ShowConsoleButton, ConsoleUnderline, ConsolePane.IsVisible);
+        var framed = !OverviewPane.IsVisible;
+        PaneFrame.Padding = framed ? new Thickness(12) : new Thickness(0);
+        PaneFrame.StrokeThickness = framed ? 1 : 0;
+        PaneFrame.Stroke = new SolidColorBrush(Color.FromArgb("#30352A"));
+        PaneFrame.BackgroundColor = framed ? Color.FromArgb("#1C1F19") : Colors.Transparent;
+        if (WorkspaceLayout.Width > 0)
+            UpdateWorkspaceLayout();
         if (OverviewPane.IsVisible)
             LoadOverview(_profiles.Selected);
         if (ModsPane.IsVisible)
@@ -400,12 +477,12 @@ public partial class InstallationPage : ContentPage
             RefreshSessionStatus(profile);
     }
 
-    private static void SetTab(Button button, bool selected)
+    private static void SetTab(Button button, BoxView underline, bool selected)
     {
-        button.SetAppThemeColor(Button.BackgroundColorProperty,
-            Color.FromArgb(selected ? "#E5D7B8" : "#E6EADD"), Color.FromArgb(selected ? "#D7B773" : "#30382A"));
-        button.SetAppThemeColor(Button.TextColorProperty, Color.FromArgb("#262B21"),
-            Color.FromArgb(selected ? "#231D10" : "#EFEEE5"));
+        underline.IsVisible = selected;
+        button.TextColor = Color.FromArgb(selected ? "#D7B773" : "#ADB1A1");
+        if (button.ImageSource is FontImageSource icon)
+            icon.Color = button.TextColor;
         SemanticProperties.SetDescription(button, selected ? $"{button.Text}, текущая вкладка" : button.Text);
     }
 
@@ -420,6 +497,9 @@ public partial class InstallationPage : ContentPage
         OverviewPvp.Text = settings is null ? "Не определено" : settings.Pvp ? "Включено" : "Выключено";
         OverviewPorts.Text = settings is null ? "Не определены"
             : $"{FormatSetting(settings.DefaultPort, 65535)} / {FormatSetting(settings.UdpPort, 65535)}";
+        OverviewModCount.Text = "—";
+        try { OverviewModCount.Text = ServerProfileMods.Read(profile).ModIds.Count.ToString(CultureInfo.InvariantCulture); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidDataException) { }
 
         static string FormatSetting(string? value, int max) =>
             int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var number) && number >= 1 && number <= max
@@ -565,6 +645,10 @@ public partial class InstallationPage : ContentPage
         if (string.Equals(_consoleTail, tail, StringComparison.Ordinal))
             return;
         _consoleTail = tail;
+        var preview = tail.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .TakeLast(4).Reverse().Select(line => line.Length > 180 ? line[..180] + "…" : line);
+        var text = string.Join('\n', preview);
+        OverviewLog.Text = text.Length == 0 ? "В журнале пока нет записей." : text;
         RenderConsole();
     }
 
@@ -732,7 +816,7 @@ public partial class InstallationPage : ContentPage
             return;
         }
 
-        ChooseFolderButton.IsEnabled = false;
+        ChooseFolderButton.IsEnabled = CompactChooseFolderButton.IsEnabled = false;
         try
         {
             var picker = new FolderPicker();
@@ -759,7 +843,7 @@ public partial class InstallationPage : ContentPage
         }
         finally
         {
-            ChooseFolderButton.IsEnabled = true;
+            ChooseFolderButton.IsEnabled = CompactChooseFolderButton.IsEnabled = true;
         }
     }
 
@@ -770,6 +854,9 @@ public partial class InstallationPage : ContentPage
             _external = null;
         _savedInstallationFolder = folder;
         SavedFolderLabel.Text = _savedInstallationFolder ?? "Папка пока не выбрана.";
+        CompactFolderPath.Text = SavedFolderLabel.Text;
+        ToolTipProperties.SetText(SavedFolderLabel, SavedFolderLabel.Text);
+        ToolTipProperties.SetText(CompactFolderPath, CompactFolderPath.Text);
         if (ProfileDetails.IsVisible)
             ShowSelectedProfile(_profiles.Selected);
     }
