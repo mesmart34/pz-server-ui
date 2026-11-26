@@ -37,6 +37,39 @@ public sealed class ServerIniSettings
 
     public static ServerIniSettings Open(ServerProfile profile) => new(ProfileConfigurationFile.Open(profile.ConfigurationPath));
 
+    public static string? ValidateModIds(string modId, string workshopId)
+    {
+        if (string.IsNullOrWhiteSpace(modId) || modId.Any(c => c == ';' || char.IsControl(c)))
+            return "Укажи один Mod ID без точки с запятой и управляющих символов.";
+        if (workshopId.Any(char.IsControl) || (workshopId.Trim() is { Length: > 0 } item
+            && (!ulong.TryParse(item, NumberStyles.None, CultureInfo.InvariantCulture, out var number) || number == 0)))
+            return "Workshop ID должен быть положительным целым числом. Для локального мода оставь поле пустым.";
+        return null;
+    }
+
+    public bool AddMod(string modId, string workshopId)
+    {
+        if (ValidateModIds(modId, workshopId) is { } error)
+            throw new ArgumentException(error);
+
+        var changes = new Dictionary<string, string>();
+        AppendId("Mods", modId.Trim(), id => id);
+        if (workshopId.Trim() is { Length: > 0 } item)
+            AppendId("WorkshopItems", item, id => id.TrimStart('0'));
+        return Save(changes);
+
+        void AppendId(string key, string id, Func<string, string> identity)
+        {
+            var field = _fields[key];
+            if (field.IsAmbiguous)
+                throw new ArgumentException($"Нельзя однозначно изменить параметр {key}.");
+            var value = field.Value;
+            if (ServerProfileMods.ParseIds(value).Any(existing => identity(existing) == identity(id)))
+                return;
+            changes.Add(key, value.Length == 0 || value.EndsWith(';') ? value + id : value + ";" + id);
+        }
+    }
+
     public bool Save(IReadOnlyDictionary<string, string> requested)
     {
         var changes = new Dictionary<string, string>(StringComparer.Ordinal);
