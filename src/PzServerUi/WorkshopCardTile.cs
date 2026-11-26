@@ -5,6 +5,7 @@ namespace PzServerUi;
 public sealed class WorkshopCardTile(string id) : BindableObject
 {
     private string? _previewPath;
+    private string? _previewRevision;
 
     public string Id { get; } = id;
     public bool CanOpen => SteamWorkshopCatalog.IsWorkshopId(Id);
@@ -19,11 +20,12 @@ public sealed class WorkshopCardTile(string id) : BindableObject
             Title = card.Title;
             OnPropertyChanged(nameof(Title));
         }
-        if (_previewPath != card.PreviewPath)
+        if (_previewPath != card.PreviewPath || _previewRevision != card.PreviewRevision)
         {
             _previewPath = card.PreviewPath;
+            _previewRevision = card.PreviewRevision;
             Cover = _previewPath is { } path
-                ? ImageSource.FromStream(() => File.OpenRead(path))
+                ? ImageSource.FromStream(() => new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete))
                 : null;
             OnPropertyChanged(nameof(Cover));
             OnPropertyChanged(nameof(HasCover));

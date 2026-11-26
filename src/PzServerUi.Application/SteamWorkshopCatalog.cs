@@ -4,10 +4,10 @@ using System.Text.Json.Serialization;
 
 namespace PzServerUi.Application;
 
-public sealed record WorkshopCard(string Id, string Title, string? PreviewPath);
+public sealed record WorkshopCard(string Id, string Title, string? PreviewPath, string? PreviewRevision);
 
 /// <summary>Enriches configured Workshop IDs without modifying or downloading the configured mods.</summary>
-public sealed class SteamWorkshopCatalog(HttpClient http, string cacheDirectory)
+public sealed partial class SteamWorkshopCatalog(HttpClient http, string cacheDirectory)
 {
     private const string DetailsUrl = "https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/";
     private const int MetadataLimit = 2 * 1024 * 1024;
@@ -45,14 +45,14 @@ public sealed class SteamWorkshopCatalog(HttpClient http, string cacheDirectory)
                 var details = await TryGetDetailsAsync(stale, cancellationToken).ConfigureAwait(false);
                 foreach (var item in details)
                 {
-                    var title = item.Title?.Trim();
-                    if (item.Result != 1 || item.AppId != 108600 || item.Id is not { } id
+                    var title = item?.Title?.Trim();
+                    if (item is null || item.Result != 1 || item.AppId != 108600 || item.Id is not { } id
                         || !stale.Contains(id) || string.IsNullOrEmpty(title))
                         continue;
                     var entry = new CacheEntry(title, ValidPreview(item.Preview)?.AbsoluteUri,
                         entries.GetValueOrDefault(id)?.CachedPreview, now);
                     entries[id] = entry;
-                    await TryWriteAsync(MetadataPath(id), JsonSerializer.SerializeToUtf8Bytes(entry),
+                    await TryWriteAsync(MetadataPath(id), JsonSerializer.SerializeToUtf8Bytes(entry, WorkshopJson.Default.CacheEntry),
                         cancellationToken).ConfigureAwait(false);
                     Report(id, entry, progress);
                 }
@@ -71,10 +71,10 @@ public sealed class SteamWorkshopCatalog(HttpClient http, string cacheDirectory)
                 var bytes = await TryDownloadPreviewAsync(uri, token).ConfigureAwait(false);
                 if (bytes is not null && await TryWriteAsync(PreviewPath(id), bytes, token).ConfigureAwait(false))
                 {
-                    await TryWriteAsync(MetadataPath(id),
-                        JsonSerializer.SerializeToUtf8Bytes(entry with { CachedPreview = entry.Preview }), token)
+                    var saved = entry with { CachedPreview = entry.Preview };
+                    await TryWriteAsync(MetadataPath(id), JsonSerializer.SerializeToUtf8Bytes(saved, WorkshopJson.Default.CacheEntry), token)
                         .ConfigureAwait(false);
-                    Report(id, entry, progress);
+                    Report(id, saved, progress);
                 }
             }).ConfigureAwait(false);
         }
@@ -83,7 +83,7 @@ public sealed class SteamWorkshopCatalog(HttpClient http, string cacheDirectory)
     private void Report(string id, CacheEntry entry, IProgress<WorkshopCard> progress)
     {
         var path = PreviewPath(id);
-        progress.Report(new WorkshopCard(id, entry.Title, File.Exists(path) ? path : null));
+        progress.Report(new WorkshopCard(id, entry.Title, File.Exists(path) ? path : null, entry.CachedPreview));
     }
 
     private string MetadataPath(string id) => Path.Combine(cacheDirectory, id + ".json");
@@ -98,7 +98,7 @@ public sealed class SteamWorkshopCatalog(HttpClient http, string cacheDirectory)
             await using var stream = File.OpenRead(MetadataPath(id));
             if (stream.Length > MetadataLimit)
                 return null;
-            var entry = await JsonSerializer.DeserializeAsync<CacheEntry>(stream, cancellationToken: token)
+            var entry = await JsonSerializer.DeserializeAsync(stream, WorkshopJson.Default.CacheEntry, token)
                 .ConfigureAwait(false);
             return string.IsNullOrWhiteSpace(entry?.Title) ? null : entry;
         }
@@ -108,7 +108,7 @@ public sealed class SteamWorkshopCatalog(HttpClient http, string cacheDirectory)
         }
     }
 
-    private async Task<Details[]> TryGetDetailsAsync(List<string> ids, CancellationToken token)
+    private async Task<Details?[]> TryGetDetailsAsync(List<string> ids, CancellationToken token)
     {
         using var form = new FormUrlEncodedContent(ids.Select((id, i) =>
             new KeyValuePair<string, string>($"publishedfileids[{i}]", id))
@@ -119,7 +119,7 @@ public sealed class SteamWorkshopCatalog(HttpClient http, string cacheDirectory)
         {
             return bytes is null
                 ? []
-                : JsonSerializer.Deserialize<DetailsEnvelope>(bytes)?.Response?.Items ?? [];
+                : JsonSerializer.Deserialize(bytes, WorkshopJson.Default.DetailsEnvelope)?.Response?.Items ?? [];
         }
         catch (JsonException)
         {
@@ -197,11 +197,15 @@ public sealed class SteamWorkshopCatalog(HttpClient http, string cacheDirectory)
 
     private sealed record CacheEntry(string Title, string? Preview, string? CachedPreview, DateTimeOffset UpdatedAt);
     private sealed record DetailsEnvelope([property: JsonPropertyName("response")] DetailsResponse? Response);
-    private sealed record DetailsResponse([property: JsonPropertyName("publishedfiledetails")] Details[]? Items);
+    private sealed record DetailsResponse([property: JsonPropertyName("publishedfiledetails")] Details?[]? Items);
     private sealed record Details(
         [property: JsonPropertyName("publishedfileid")] string? Id,
         [property: JsonPropertyName("result")] int Result,
         [property: JsonPropertyName("consumer_app_id")] int AppId,
         [property: JsonPropertyName("title")] string? Title,
         [property: JsonPropertyName("preview_url")] string? Preview);
+
+    [JsonSerializable(typeof(CacheEntry))]
+    [JsonSerializable(typeof(DetailsEnvelope))]
+    private sealed partial class WorkshopJson : JsonSerializerContext;
 }
