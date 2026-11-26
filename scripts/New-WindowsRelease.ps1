@@ -21,8 +21,7 @@ $app = Join-Path $repo 'src/PzServerUi/PzServerUi.csproj'
 $name = "PzServerUi-v$BuildVersion-win-x64"
 $out = New-Item -ItemType Directory -Force $OutputDirectory
 $publish = Join-Path $out.FullName $name
-$zip = "$publish.zip"
-if ((Test-Path -LiteralPath $publish) -or (Test-Path -LiteralPath $zip)) {
+if (Test-Path -LiteralPath $publish) {
     throw "Choose a fresh output directory: $name already exists in $($out.FullName)."
 }
 
@@ -31,9 +30,8 @@ $properties = @(
     "-p:Version=$BuildVersion",
     "-p:VersionPrefix=$prefix",
     '-p:RuntimeIdentifierOverride=win-x64',
-    '-p:WindowsPackageType=None',
-    '-p:WindowsAppSDKSelfContained=true',
-    '-p:SelfContained=true'
+    '-p:CreatePortableExecutable=true',
+    '-p:DebugType=embedded'
 )
 if ($ArtifactsPath) { $properties += "-p:ArtifactsPath=$ArtifactsPath" }
 if ($RestoreSource) { $properties += "-p:RestoreSources=$RestoreSource" }
@@ -48,18 +46,13 @@ try {
     Pop-Location
 }
 
-foreach ($filename in 'PzServerUi.exe', 'PzServerUi.dll', 'coreclr.dll', 'Microsoft.UI.Xaml.dll') {
-    if (-not (Test-Path -LiteralPath (Join-Path $publish $filename) -PathType Leaf)) {
-        throw "Incomplete Windows publish: $filename is missing."
-    }
+$files = @(Get-ChildItem -LiteralPath $publish -Force)
+if ($files.Count -ne 1 -or $files[0].PSIsContainer -or $files[0].Name -cne 'PzServerUi.exe') {
+    throw "Expected one self-contained PzServerUi.exe, found: $($files.Name -join ', ')."
 }
-$info = [System.Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $publish 'PzServerUi.dll'))
+$info = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($files[0].FullName)
 if ($info.ProductVersion -cne $BuildVersion) {
-    throw "Expected DLL product version $BuildVersion, got $($info.ProductVersion)."
+    throw "Expected EXE product version $BuildVersion, got $($info.ProductVersion)."
 }
-[ordered]@{ version = $BuildVersion; commit = $commit; runtime = 'win-x64' } |
-    ConvertTo-Json | Set-Content -LiteralPath (Join-Path $publish 'version.json') -Encoding utf8
-
-Add-Type -AssemblyName System.IO.Compression.FileSystem
-[System.IO.Compression.ZipFile]::CreateFromDirectory($publish, $zip)
-Write-Host "Created $zip"
+# Keep the original filename: WinUI resolves the embedded application PRI by its executable name.
+Write-Host "Created $($files[0].FullName) from $commit"
