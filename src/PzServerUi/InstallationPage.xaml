@@ -369,21 +369,30 @@
                                     <Button Text="Перечитать INI" Margin="0,0,0,4" Clicked="OnReloadIniClicked" />
                                 </FlexLayout>
                                 <Label x:Name="IniMessage" IsVisible="False" LineBreakMode="WordWrap" />
-                                <VerticalStackLayout x:Name="IniFields" Spacing="6" SizeChanged="OnIniFieldsSizeChanged" />
+                                <local:ResponsiveSettingsGrid x:Name="IniFields" MinimumColumnWidth="236"
+                                                              RowSpacing="6" ColumnSpacing="6" />
                                 <BoxView Margin="0,8" HeightRequest="1"
                                          Color="{AppThemeBinding Light=#CFD4C3, Dark=#34392E}" />
                                 <Label Text="Песочница" FontSize="18" FontAttributes="Bold"
                                        SemanticProperties.HeadingLevel="Level2" />
                                 <VerticalStackLayout x:Name="SandboxFields" IsVisible="False" Spacing="6">
-                                    <HorizontalStackLayout Spacing="4">
-                                        <CheckBox x:Name="StarterKitBox" SemanticProperties.Description="Стартовый набор" />
-                                        <Label Text="Стартовый набор" VerticalOptions="Center" />
-                                    </HorizontalStackLayout>
-                                    <Label Text="Дополнительные очки черт (от −100 до 100)" />
-                                    <Entry x:Name="TraitPointsEntry" Keyboard="Numeric" MaxLength="11"
-                                           SemanticProperties.Description="Дополнительные очки черт" />
-                                    <Picker x:Name="DayLengthPicker" Title="Длительность игрового дня"
-                                            SemanticProperties.Description="Длительность игрового дня в реальном времени" />
+                                    <local:ResponsiveSettingsGrid>
+                                        <VerticalStackLayout Spacing="2">
+                                            <Label Text="Стартовый набор" />
+                                            <CheckBox x:Name="StarterKitBox" HorizontalOptions="Start"
+                                                      SemanticProperties.Description="Стартовый набор" />
+                                        </VerticalStackLayout>
+                                        <VerticalStackLayout Spacing="2">
+                                            <Label Text="Дополнительные очки черт (от −100 до 100)" LineBreakMode="WordWrap" />
+                                            <Entry x:Name="TraitPointsEntry" Keyboard="Numeric" MaxLength="11"
+                                                   SemanticProperties.Description="Дополнительные очки черт" />
+                                        </VerticalStackLayout>
+                                        <VerticalStackLayout Spacing="2">
+                                            <Label Text="Длительность игрового дня" LineBreakMode="WordWrap" />
+                                            <Picker x:Name="DayLengthPicker" Title="Выбрать длительность"
+                                                    SemanticProperties.Description="Длительность игрового дня в реальном времени" />
+                                        </VerticalStackLayout>
+                                    </local:ResponsiveSettingsGrid>
                                     <Label Text="Набор и очки проверяются на новом персонаже."
                                            LineBreakMode="WordWrap" />
                                 </VerticalStackLayout>
