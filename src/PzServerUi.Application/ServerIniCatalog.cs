@@ -15,6 +15,7 @@ internal static class ServerIniCatalog
     public static IReadOnlyDictionary<string, string> Fallbacks { get; } = new Dictionary<string, string>
     {
         ["MaxPlayers"] = "32", ["PVP"] = "true",
+        ["Mods"] = "", ["WorkshopItems"] = "",
         ["DefaultPort"] = FormattableString.Invariant($"{ServerGamePorts.StandardDefaultPort}"),
         ["UDPPort"] = FormattableString.Invariant($"{ServerGamePorts.StandardUdpPort}")
     };
