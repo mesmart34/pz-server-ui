@@ -58,15 +58,15 @@ public sealed class ResponsiveSettingsGrid : Grid
                 continue;
             if (view == _details)
             {
-                SetRow(view, detailRow);
-                SetColumn(view, 0);
-                SetColumnSpan(view, _columns);
+                Grid.SetRow(view, detailRow);
+                Grid.SetColumn(view, 0);
+                Grid.SetColumnSpan(view, _columns);
                 continue;
             }
 
             var row = index / _columns;
-            SetRow(view, _details is not null && row >= detailRow ? row + 1 : row);
-            SetColumn(view, index % _columns);
+            Grid.SetRow(view, _details is not null && row >= detailRow ? row + 1 : row);
+            Grid.SetColumn(view, index % _columns);
             index++;
         }
     }
