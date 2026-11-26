@@ -15,7 +15,6 @@ public partial class InstallationPage
     private string? _iniProfilePath;
     private IniDraft? _iniDraft;
     private ServerIniGroup? _expandedIniGroup;
-    private int _iniColumnCount = 1;
     private bool _loadingIni;
 
     private async void OnReloadIniClicked(object? sender, EventArgs e)
@@ -37,7 +36,7 @@ public partial class InstallationPage
         _iniProfilePath = profile?.ConfigurationPath;
         _iniDraft = null;
         _expandedIniGroup = null;
-        IniFields.Children.Clear();
+        ClearIniFields();
         IniSearch.IsVisible = SaveIniButton.IsEnabled = IniMessage.IsVisible = false;
         if (profile is null)
             return;
@@ -64,15 +63,10 @@ public partial class InstallationPage
 
     private void OnIniSearchChanged(object? sender, TextChangedEventArgs e) => RenderIniFields(openSingleMatch: true);
 
-    private void OnIniFieldsSizeChanged(object? sender, EventArgs e)
+    private void ClearIniFields()
     {
-        if (sender is not VisualElement { Width: > 0 } panel)
-            return;
-        var columns = panel.Width >= 730 ? 3 : panel.Width >= 480 ? 2 : 1;
-        if (columns == _iniColumnCount)
-            return;
-        _iniColumnCount = columns;
-        RenderIniFields();
+        IniFields.Children.Clear();
+        IniFields.SetDetails(null, null);
     }
 
     private void RenderIniFields(bool openSingleMatch = false)
@@ -92,48 +86,33 @@ public partial class InstallationPage
         if (groups.Length == 0)
         {
             IniFields.Children.Add(new Label { Text = "Параметры не найдены." });
+            IniFields.SetDetails(null, null);
             return;
         }
 
-        var visibleColumns = Math.Min(_iniColumnCount, groups.Length);
-        var headers = new Dictionary<ServerIniGroup, (Button Button, IGrouping<ServerIniGroup, ServerIniField> Group, ContentView Panel)>();
-        ContentView? activePanel = null;
-        foreach (var groupRow in groups.Chunk(visibleColumns))
+        var headers = new Dictionary<ServerIniGroup, Button>();
+        foreach (var group in groups)
         {
-            var row = new Grid { ColumnSpacing = 6 };
-            var panel = new ContentView { IsVisible = false };
-            for (var column = 0; column < visibleColumns; column++)
-                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Star });
-            for (var column = 0; column < groupRow.Length; column++)
+            var header = new Button { Style = (Style)Resources["IniGroupHeader"] };
+            headers.Add(group.Key, header);
+            IniFields.Children.Add(header);
+            header.Clicked += (_, _) =>
             {
-                var group = groupRow[column];
-                var header = new Button { Style = (Style)Resources["IniGroupHeader"] };
-                headers.Add(group.Key, (header, group, panel));
-                Grid.SetColumn(header, column);
-                row.Children.Add(header);
-                header.Clicked += (_, _) =>
-                {
-                    _expandedIniGroup = _expandedIniGroup == group.Key ? null : group.Key;
-                    UpdatePanels();
-                };
-            }
-            IniFields.Children.Add(row);
-            IniFields.Children.Add(panel);
+                _expandedIniGroup = _expandedIniGroup == group.Key ? null : group.Key;
+                UpdatePanels();
+            };
         }
         UpdatePanels();
 
         void UpdatePanels()
         {
-            if (activePanel is not null)
+            Button? anchor = null;
+            Border? panel = null;
+            foreach (var group in groups)
             {
-                activePanel.IsVisible = false;
-                activePanel.Content = null;
-                activePanel = null;
-            }
-            foreach (var (key, (button, group, panel)) in headers)
-            {
-                var open = _expandedIniGroup == key;
-                var name = IniGroupName(key);
+                var button = headers[group.Key];
+                var open = _expandedIniGroup == group.Key;
+                var name = IniGroupName(group.Key);
                 button.Text = $"{(open ? "▾" : "▸")}  {name} ({group.Count()})";
                 button.BorderColor = Color.FromArgb(open ? "#786643" : "#34392E");
                 button.BackgroundColor = Color.FromArgb(open ? "#302B21" : "#23271F");
@@ -142,13 +121,13 @@ public partial class InstallationPage
                 if (!open)
                     continue;
 
-                var rows = new VerticalStackLayout { Spacing = 6 };
+                var fields = new ResponsiveSettingsGrid();
                 foreach (var field in group)
-                    rows.Children.Add(BuildIniField(draft, field));
-                panel.Content = new Border { Style = (Style)Resources["Card"], Padding = 10, Content = rows };
-                panel.IsVisible = true;
-                activePanel = panel;
+                    fields.Children.Add(BuildIniField(draft, field));
+                anchor = button;
+                panel = new Border { Style = (Style)Resources["Card"], Padding = 10, Content = fields };
             }
+            IniFields.SetDetails(anchor, panel);
         }
     }
 
@@ -156,10 +135,11 @@ public partial class InstallationPage
     {
         var label = field.Label == field.Key ? field.Key : $"{field.Label} ({field.Key})";
         var row = new VerticalStackLayout { Spacing = 2 };
-        row.Children.Add(new Label { Text = label, LineBreakMode = LineBreakMode.WordWrap });
+        row.Children.Add(new Label { Text = label, LineBreakMode = LineBreakMode.CharacterWrap });
         if (field.IsAmbiguous)
         {
-            row.Children.Add(new Label { Text = "Недоступно: дубликат или неверный регистр ключа в INI.", FontSize = 12 });
+            row.Children.Add(new Label { Text = "Недоступно: дубликат или неверный регистр ключа в INI.",
+                FontSize = 12, LineBreakMode = LineBreakMode.WordWrap });
             return row;
         }
         var value = draft.Changes.GetValueOrDefault(field.Key, field.Value);
