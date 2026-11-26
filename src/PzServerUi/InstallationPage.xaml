@@ -402,6 +402,29 @@
                                 </HorizontalStackLayout>
                                 <Label Text="Список из INI. Он не показывает, какие моды загружены в текущем сеансе."
                                        LineBreakMode="WordWrap" />
+                                <Button x:Name="AddModButton" Text="Добавить мод" HorizontalOptions="Start"
+                                        Clicked="OnAddModClicked" />
+                                <Border x:Name="AddModPanel" Style="{StaticResource Card}" Padding="10" IsVisible="False">
+                                    <VerticalStackLayout Spacing="6">
+                                        <Label Text="Mod ID" FontAttributes="Bold" />
+                                        <Entry x:Name="NewModId" Placeholder="Один ID из настроек мода"
+                                               IsSpellCheckEnabled="False" IsTextPredictionEnabled="False"
+                                               SemanticProperties.Description="Mod ID" TextChanged="OnModInputChanged" />
+                                        <Label Text="Workshop ID (необязательно)" FontAttributes="Bold" />
+                                        <Entry x:Name="NewWorkshopId" Placeholder="Числовой ID Steam Workshop"
+                                               IsSpellCheckEnabled="False" IsTextPredictionEnabled="False"
+                                               SemanticProperties.Description="Workshop ID, необязательно" TextChanged="OnModInputChanged" />
+                                        <Label x:Name="ModInputError" IsVisible="False" LineBreakMode="WordWrap" />
+                                        <FlexLayout Wrap="Wrap">
+                                            <Button x:Name="SaveModButton" Text="Сохранить мод" Margin="0,0,8,4"
+                                                    Clicked="OnSaveModClicked" IsEnabled="False" />
+                                            <Button x:Name="ReloadModIniButton" Text="Перечитать INI" Margin="0,0,8,4"
+                                                    Clicked="OnReloadModIniClicked" IsVisible="False" />
+                                            <Button Text="Отмена" Margin="0,0,0,4" Clicked="OnCancelAddModClicked" />
+                                        </FlexLayout>
+                                    </VerticalStackLayout>
+                                </Border>
+                                <Label x:Name="ModSaveMessage" IsVisible="False" LineBreakMode="WordWrap" />
                                 <Entry x:Name="ModSearch" Placeholder="Найти Mod ID или Workshop ID" TextChanged="OnModSearchChanged"
                                        SemanticProperties.Description="Поиск по идентификаторам модов" />
                                 <VerticalStackLayout x:Name="ModLists" Spacing="5">

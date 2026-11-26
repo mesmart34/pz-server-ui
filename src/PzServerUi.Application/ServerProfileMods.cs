@@ -34,6 +34,9 @@ public sealed class ServerProfileMods
         if (previous is not null)
             throw new InvalidDataException($"Параметр {key} указан несколько раз.");
         // These are distinct lists, not pairs. Keep IDs opaque and in the order written.
-        return value.Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        return ParseIds(value);
     }
+
+    internal static string[] ParseIds(string value) =>
+        value.Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
 }

@@ -152,6 +152,51 @@ CheckThrows<FileNotFoundException>(() => ServerProfileMods.Read(modProfiles.Sele
     "A deleted INI is an error, not an empty mod list.");
 Console.WriteLine("PASS: reads the selected profile's Mod IDs and Workshop IDs without modifying its INI");
 
+var editableModsIni = Path.Combine(modProfiles.ConfigurationDirectory, "editable-mods.ini");
+var editableModsProfile = new ServerProfile("editable-mods", editableModsIni, null);
+var originalMods = "\uFEFF# Keep this comment\r\nMods = \\First; Alpha Patches;  \r\nPublicName=Untouched\r\n";
+File.WriteAllText(editableModsIni, originalMods);
+var modEditor = ServerIniSettings.Open(editableModsProfile);
+Check(modEditor.AddMod(@" \New Mod ", " 1234567890 "), "Adding a mod and a Workshop item saves the profile.");
+var expectedMods = "\uFEFF# Keep this comment\r\nMods = \\First; Alpha Patches;\\New Mod  \r\nPublicName=Untouched\r\nWorkshopItems=1234567890\r\n";
+Check(File.ReadAllBytes(editableModsIni).SequenceEqual(System.Text.Encoding.UTF8.GetBytes(expectedMods))
+    && File.ReadAllBytes(moddedIni).SequenceEqual(moddedBytes),
+    "Adding a mod preserves existing ordering, INI formatting, comments and other profiles.");
+var newMods = ServerProfileMods.Read(editableModsProfile);
+Check(newMods.ModIds.SequenceEqual(new[] { @"\First", "Alpha Patches", @"\New Mod" })
+    && newMods.WorkshopIds.SequenceEqual(new[] { "1234567890" }),
+    "A saved addition is visible in the configured mod lists.");
+Check(!modEditor.AddMod(@"\New Mod", "01234567890") && File.ReadAllText(editableModsIni) == expectedMods[1..],
+    "An existing Mod ID and the same numeric Workshop ID are a no-op.");
+Check(modEditor.AddMod("Another Mod From Same Item", "1234567890")
+    && ServerProfileMods.Read(editableModsProfile).WorkshopIds.SequenceEqual(new[] { "1234567890" }),
+    "Another Mod ID can reuse an already configured Workshop item.");
+var beforeInvalidMod = File.ReadAllBytes(editableModsIni);
+CheckThrows<ArgumentException>(() => modEditor.AddMod("Injected;Second", "123"), "Reject multiple Mod IDs.");
+CheckThrows<ArgumentException>(() => modEditor.AddMod("Single", "1a2"), "Reject a nonnumeric Workshop ID.");
+CheckThrows<ArgumentException>(() => modEditor.AddMod("Single", "0"), "Reject Workshop ID zero.");
+CheckThrows<ArgumentException>(() => modEditor.AddMod("Single\nOther=Value", ""), "Reject an INI line break.");
+Check(File.ReadAllBytes(editableModsIni).SequenceEqual(beforeInvalidMod), "Invalid identifiers never change the INI.");
+File.AppendAllText(editableModsIni, "# External edit\r\n");
+CheckThrows<ProfileConfigurationConflictException>(() => modEditor.AddMod("Local Mod", ""),
+    "Adding a mod refuses a stale snapshot even when unrelated INI content changed.");
+Check(File.ReadAllBytes(editableModsIni).SequenceEqual(
+    beforeInvalidMod.Concat(System.Text.Encoding.UTF8.GetBytes("# External edit\r\n"))),
+    "The contents of the external edit must survive the conflict unmodified.");
+Check(ServerIniSettings.Open(editableModsProfile).AddMod("Local Mod", "")
+    && ServerProfileMods.Read(editableModsProfile).ModIds.Last() == "Local Mod",
+    "Reopening the snapshot allows the same submission without a Workshop ID.");
+File.WriteAllText(editableModsIni, "# No mod settings yet\n");
+Check(ServerIniSettings.Open(editableModsProfile).AddMod("LocalOnly", "")
+    && File.ReadAllText(editableModsIni) == "# No mod settings yet\nMods=LocalOnly\n",
+    "Adding a local mod creates only the missing Mods key.");
+File.WriteAllText(editableModsIni, "WorkshopItems=123\nworkshopitems=456\n");
+CheckThrows<ArgumentException>(() => ServerIniSettings.Open(editableModsProfile).AddMod("Do not save", "789"),
+    "Do not write either key when the target Workshop setting is ambiguous.");
+Check(File.ReadAllText(editableModsIni) == "WorkshopItems=123\nworkshopitems=456\n",
+    "Saving both IDs is all or nothing when a target key is ambiguous.");
+Console.WriteLine("PASS: adds a Mod ID and optional Workshop ID to the selected profile's INI");
+
 var basicIni = Path.Combine(modProfiles.ConfigurationDirectory, "settings.ini");
 var basicProfile = new ServerProfile("settings", basicIni, null);
 var basicText = "\uFEFF# Настройки\r\nPublicName=Keep this\r\nMaxPlayers=0032 \r\nPVP=true\r\n"

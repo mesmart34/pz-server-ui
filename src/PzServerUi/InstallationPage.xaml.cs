@@ -537,6 +537,13 @@ public partial class InstallationPage : ContentPage
 
     private void RefreshProfileMods(ServerProfile? profile)
     {
+        if (_modsProfilePath != profile?.ConfigurationPath)
+        {
+            _modsProfilePath = profile?.ConfigurationPath;
+            ModSaveMessage.IsVisible = false;
+            CloseAddMod();
+        }
+        AddModButton.IsEnabled = false;
         ModLists.IsVisible = ModsReadError.IsVisible = false;
         _modSnapshot = null;
         if (profile is null)
@@ -546,6 +553,7 @@ public partial class InstallationPage : ContentPage
             _modSnapshot = ServerProfileMods.Read(profile);
             ApplyModFilter();
             ModLists.IsVisible = true;
+            AddModButton.IsEnabled = true;
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidDataException)
         {
