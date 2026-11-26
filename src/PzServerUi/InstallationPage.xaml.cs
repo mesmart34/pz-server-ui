@@ -23,7 +23,6 @@ public partial class InstallationPage : ContentPage
     private readonly Dictionary<string, long> _settingsAtLaunch = new(StringComparer.OrdinalIgnoreCase);
     private long _settingsRevision;
     private ProfileRow[] _profileRows = [];
-    private ServerProfileMods? _modSnapshot;
     private string? _consoleTail;
     private bool _compact;
     private bool _showCompactProfiles;
@@ -76,6 +75,7 @@ public partial class InstallationPage : ContentPage
         };
         Unloaded += (_, _) =>
         {
+            CancelWorkshopLoad();
             statusTimer.Stop();
             externalTimer.Stop();
             if (_nativeWindow is not null)
@@ -467,7 +467,7 @@ public partial class InstallationPage : ContentPage
         ProfilePane.IsVisible = pane == ProfilePane;
         ModsPane.IsVisible = pane == ModsPane;
         ConsolePane.IsVisible = pane == ConsolePane;
-        DetailsScroll.IsVisible = !ConsolePane.IsVisible;
+        DetailsScroll.IsVisible = OverviewPane.IsVisible || ProfilePane.IsVisible;
         SetTab(ShowOverviewButton, OverviewUnderline, "grid", OverviewPane.IsVisible);
         SetTab(ShowProfileButton, ProfileUnderline, "sliders", ProfilePane.IsVisible);
         SetTab(ShowModsButton, ModsUnderline, "box", ModsPane.IsVisible);
@@ -481,6 +481,8 @@ public partial class InstallationPage : ContentPage
             LoadOverview(_profiles.Selected);
         if (ModsPane.IsVisible)
             RefreshProfileMods(_profiles.Selected);
+        else
+            CancelWorkshopLoad();
         if (ProfilePane.IsVisible && _iniProfilePath != _profiles.Selected?.ConfigurationPath)
             LoadIni(_profiles.Selected);
         if (_profiles.Selected is { } profile)
@@ -533,53 +535,6 @@ public partial class InstallationPage : ContentPage
             _pendingSettings.Remove(name);
         else if (status is not (ServerSessionStatus.Starting or ServerSessionStatus.Running))
             _settingsAtLaunch.Remove(name);
-    }
-
-    private void RefreshProfileMods(ServerProfile? profile)
-    {
-        if (_modsProfilePath != profile?.ConfigurationPath)
-        {
-            _modsProfilePath = profile?.ConfigurationPath;
-            ModSaveMessage.IsVisible = false;
-            CloseAddMod();
-        }
-        AddModButton.IsEnabled = false;
-        ModLists.IsVisible = ModsReadError.IsVisible = false;
-        _modSnapshot = null;
-        if (profile is null)
-            return;
-        try
-        {
-            _modSnapshot = ServerProfileMods.Read(profile);
-            ApplyModFilter();
-            ModLists.IsVisible = true;
-            AddModButton.IsEnabled = true;
-        }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidDataException)
-        {
-            ModsReadError.Text = error is InvalidDataException
-                ? $"Не удалось прочитать список модов. {error.Message}"
-                : "Не удалось прочитать INI этого профиля. Проверь файл и нажми «Обновить».";
-            ModsReadError.IsVisible = true;
-        }
-    }
-
-    private void OnModSearchChanged(object? sender, TextChangedEventArgs e) => ApplyModFilter();
-
-    private void ApplyModFilter()
-    {
-        if (_modSnapshot is not { } mods)
-            return;
-        ModIdsLabel.Text = FormatModIds(mods.ModIds);
-        WorkshopIdsLabel.Text = FormatModIds(mods.WorkshopIds);
-
-        string FormatModIds(IReadOnlyList<string> ids)
-        {
-            if (ids.Count == 0)
-                return "Не указаны.";
-            var matches = ids.Where(id => OverviewQueries.Matches(id, ModSearch.Text)).ToArray();
-            return matches.Length == 0 ? "Нет совпадений." : string.Join('\n', matches);
-        }
     }
 
     private void OnConsoleSearchChanged(object? sender, TextChangedEventArgs e) => RenderConsole();

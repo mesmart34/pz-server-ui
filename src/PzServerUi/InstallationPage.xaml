@@ -403,7 +403,10 @@
                                 </FlexLayout>
                                 <Label x:Name="SandboxMessage" IsVisible="False" LineBreakMode="WordWrap" />
                             </VerticalStackLayout>
-                            <VerticalStackLayout x:Name="ModsPane" IsVisible="False" Spacing="8">
+                          </VerticalStackLayout>
+                        </ScrollView>
+                            <Grid x:Name="ModsPane" IsVisible="False" RowDefinitions="Auto,*" RowSpacing="8">
+                              <VerticalStackLayout Spacing="7">
                                 <HorizontalStackLayout Spacing="8">
                                     <Image Source="design_box.png" Style="{StaticResource InlineIcon}" />
                                     <Label Text="Моды выбранного профиля" Style="{StaticResource SectionTitle}"
@@ -411,9 +414,13 @@
                                 </HorizontalStackLayout>
                                 <Label Text="Список из INI. Он не показывает, какие моды загружены в текущем сеансе."
                                        LineBreakMode="WordWrap" />
-                                <Button x:Name="AddModButton" Text="Добавить мод" HorizontalOptions="Start"
-                                        Clicked="OnAddModClicked" />
-                                <Border x:Name="AddModPanel" Style="{StaticResource Card}" Padding="10" IsVisible="False">
+                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                    <Entry x:Name="ModSearch" Placeholder="Название или ID" TextChanged="OnModSearchChanged"
+                                           SemanticProperties.Description="Поиск по названию или ID мода" />
+                                    <Button Grid.Column="1" x:Name="AddModButton" Text="Добавить мод" Clicked="OnAddModClicked" />
+                                </Grid>
+                                <ScrollView x:Name="AddModPanel" MaximumHeightRequest="220" IsVisible="False">
+                                  <Border Style="{StaticResource Card}" Padding="10">
                                     <VerticalStackLayout Spacing="6">
                                         <Label Text="Mod ID" FontAttributes="Bold" />
                                         <Entry x:Name="NewModId" Placeholder="Один ID из настроек мода"
@@ -432,21 +439,50 @@
                                             <Button Text="Отмена" Margin="0,0,0,4" Clicked="OnCancelAddModClicked" />
                                         </FlexLayout>
                                     </VerticalStackLayout>
-                                </Border>
+                                  </Border>
+                                </ScrollView>
                                 <Label x:Name="ModSaveMessage" IsVisible="False" LineBreakMode="WordWrap" />
-                                <Entry x:Name="ModSearch" Placeholder="Найти Mod ID или Workshop ID" TextChanged="OnModSearchChanged"
-                                       SemanticProperties.Description="Поиск по идентификаторам модов" />
-                                <VerticalStackLayout x:Name="ModLists" Spacing="5">
-                                    <Label Text="Mod ID (Mods)" FontAttributes="Bold" SemanticProperties.HeadingLevel="Level3" />
-                                    <Label x:Name="ModIdsLabel" LineBreakMode="CharacterWrap" />
-                                    <Label Text="Workshop ID (WorkshopItems)" Margin="0,6,0,0" FontAttributes="Bold"
-                                           SemanticProperties.HeadingLevel="Level3" />
-                                    <Label x:Name="WorkshopIdsLabel" LineBreakMode="CharacterWrap" />
+                                <VerticalStackLayout x:Name="ModLists" Spacing="6">
+                                    <Button x:Name="ModIdsButton" Style="{StaticResource Action}" HorizontalOptions="Start"
+                                            Clicked="OnToggleModIdsClicked" />
+                                    <ScrollView x:Name="ModIdsPanel" IsVisible="False" MaximumHeightRequest="92">
+                                        <Label x:Name="ModIdsLabel" LineBreakMode="CharacterWrap" />
+                                    </ScrollView>
                                 </VerticalStackLayout>
                                 <Label x:Name="ModsReadError" IsVisible="False" LineBreakMode="WordWrap" />
-                            </VerticalStackLayout>
-                          </VerticalStackLayout>
-                        </ScrollView>
+                                <Label x:Name="WorkshopEmptyLabel" Style="{StaticResource Muted}" IsVisible="False"
+                                       LineBreakMode="WordWrap" />
+                              </VerticalStackLayout>
+                              <CollectionView x:Name="WorkshopCards" Grid.Row="1" SelectionMode="None"
+                                              SizeChanged="OnWorkshopCardsSizeChanged" ItemSizingStrategy="MeasureFirstItem">
+                                <CollectionView.ItemsLayout>
+                                    <GridItemsLayout Orientation="Vertical" Span="1"
+                                                     HorizontalItemSpacing="10" VerticalItemSpacing="10" />
+                                </CollectionView.ItemsLayout>
+                                <CollectionView.ItemTemplate>
+                                    <DataTemplate x:DataType="local:WorkshopCardTile">
+                                        <Border Style="{StaticResource Card}" BackgroundColor="#22261E" Padding="0">
+                                            <Grid RowDefinitions="132,Auto">
+                                                <Grid BackgroundColor="#161B15">
+                                                    <Image Source="design_box.png" WidthRequest="40" HeightRequest="40"
+                                                           HorizontalOptions="Center" VerticalOptions="Center" Opacity=".55" />
+                                                    <Image Source="{Binding Cover}" Aspect="AspectFill" IsVisible="{Binding HasCover}"
+                                                           InputTransparent="True" />
+                                                </Grid>
+                                                <Grid Grid.Row="1" Padding="10,8,10,6" RowDefinitions="42,Auto,Auto">
+                                                    <Label Text="{Binding Title}" FontAttributes="Bold" FontSize="15"
+                                                           MaxLines="2" LineBreakMode="TailTruncation" ToolTipProperties.Text="{Binding Title}" />
+                                                    <Label Grid.Row="1" Text="{Binding Id, StringFormat='Workshop ID: {0}'}"
+                                                           FontSize="11" Style="{StaticResource Muted}" LineBreakMode="TailTruncation" />
+                                                    <Button Grid.Row="2" Text="Открыть в Steam" Style="{StaticResource Link}" Padding="0"
+                                                            HorizontalOptions="Start" IsEnabled="{Binding CanOpen}" Clicked="OnOpenWorkshopClicked" />
+                                                </Grid>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </CollectionView.ItemTemplate>
+                              </CollectionView>
+                            </Grid>
                             <Grid x:Name="ConsolePane" IsVisible="False" RowDefinitions="Auto,*,Auto,Auto,Auto" RowSpacing="5">
                                 <VerticalStackLayout Spacing="6">
                                     <HorizontalStackLayout Spacing="8">
